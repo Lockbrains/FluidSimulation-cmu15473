@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_SkyboxMaterial: {fileID: 2100000, guid: 03902d0b450add74fa144e9510fd0f85, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.18028326, g: 0.22571333, b: 0.30692202, a: 1}
+  m_IndirectSpecularColor: {r: 0.09855941, g: 0.14263864, b: 0.21109161, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -132,6 +132,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 553318309}
+  - component: {fileID: 553318310}
   m_Layer: 0
   m_Name: SPH Simulator
   m_TagString: Untagged
@@ -154,6 +155,35 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1001942779}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &553318310
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 553318307}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3067e8c4dbdc94ec6a6c33988da1ef19, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  showSpheres: 1
+  numToSpawn: {x: 10, y: 10, z: 10}
+  boxSize: {x: 4, y: 10, z: 3}
+  spawnCenter: {x: -1.84, y: 3.852, z: -0.66}
+  particleRadius: 0.1
+  particleMesh: {fileID: 2540817853737639666, guid: d2bcb9b63a067d643b56910fd449b51b, type: 3}
+  particleRenderSize: 8
+  material: {fileID: 2100000, guid: ea5407f7bde59d6498a95296ae104fd0, type: 2}
+  spawnJitter: 0.2
+  shader: {fileID: 7200000, guid: 04d9bdd1d71c74dd2a8378af306f4f80, type: 3}
+  particles: []
+  boundDamping: -0.3
+  viscosity: -0.004
+  particleMass: 1
+  gasConstant: 2
+  restingDensity: 1
+  timestep: 0.007
 --- !u!1 &705507993
 GameObject:
   m_ObjectHideFlags: 0
@@ -359,7 +389,7 @@ MonoBehaviour:
     m_Bits: 4294967295
   stopNaNPropagation: 1
   finalBlitToCameraTarget: 0
-  antialiasingMode: 0
+  antialiasingMode: 1
   temporalAntialiasing:
     jitterSpread: 0.75
     sharpness: 0.25
@@ -368,8 +398,8 @@ MonoBehaviour:
   subpixelMorphologicalAntialiasing:
     quality: 2
   fastApproximateAntialiasing:
-    fastMode: 0
-    keepAlpha: 0
+    fastMode: 1
+    keepAlpha: 1
   fog:
     enabled: 1
     excludeSkybox: 1
