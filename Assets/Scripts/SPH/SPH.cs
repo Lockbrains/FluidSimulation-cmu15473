@@ -55,6 +55,8 @@ public class SPH : MonoBehaviour
     private ComputeBuffer _argsBuffer;
     private ComputeBuffer _particlesBuffer;
     private int integrateKernel;
+    private int computeForceKernel;
+    private int densityPressureKernel;
 
     private static readonly int SizeProperty = Shader.PropertyToID("_size");
     private static readonly int ParticlesBufferProperty = Shader.PropertyToID("_particlesBuffer");
@@ -112,6 +114,8 @@ public class SPH : MonoBehaviour
         shader.SetVector("boxSize", boxSize); 
         shader.SetFloat("timestep", timestep);
         //Debug.Log(totalParticles);
+        shader.Dispatch(densityPressureKernel, totalParticles / 100, 1, 1);
+        shader.Dispatch(computeForceKernel, totalParticles / 100, 1, 1);
         shader.Dispatch(integrateKernel, totalParticles / 100, 1, 1);
     }
 
@@ -121,7 +125,7 @@ public class SPH : MonoBehaviour
         Gizmos.DrawWireCube(Vector3.zero, boxSize);
 
         if (!Application.isPlaying)
-        {
+        { 
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(spawnCenter, 0.1f);
         }
@@ -159,6 +163,8 @@ public class SPH : MonoBehaviour
     private void SetupComputeBuffers()
     {
         integrateKernel = shader.FindKernel("Integrate");
+        computeForceKernel = shader.FindKernel("ComputeForces");
+        densityPressureKernel = shader.FindKernel("ComputeDensityPressure");
         
         shader.SetInt("particleLength", totalParticles);
         shader.SetFloat("particleMass", particleMass);
@@ -175,7 +181,9 @@ public class SPH : MonoBehaviour
         shader.SetFloat("radius4", particleRadius * particleRadius * particleRadius * particleRadius);
         shader.SetFloat("radius5", particleRadius * particleRadius * particleRadius * particleRadius * particleRadius);
         
-        shader.SetBuffer(integrateKernel, "_particles", _particlesBuffer); 
-        
+        shader.SetBuffer(integrateKernel, "_particles", _particlesBuffer);
+        shader.SetBuffer(computeForceKernel, "_particles", _particlesBuffer);
+        shader.SetBuffer(densityPressureKernel, "_particles", _particlesBuffer);
+
     }
 }
