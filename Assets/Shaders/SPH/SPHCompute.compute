@@ -29,6 +29,8 @@ float3 boxSize;
 [numthreads(100, 1, 1)]
 void Integrate (uint3 id: SV_DISPATCHTHREADID)
 {
+    _particles[id.x].currentForce = float3(0, -9.81 * particleMass, 0);
+    
     float3 vel = _particles[id.x].velocity + ((_particles[id.x].currentForce / particleMass) * timestep);
     _particles[id.x].position += vel * timestep;
 
