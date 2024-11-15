@@ -1,0 +1,75 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Integrate
+#pragma kernel ComputeForces
+#pragma kernel ComputeDensityAndPressure
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+RWStructuredBuffer<float3> particles;
+RWStructuredBuffer<float3> velocities;
+RWStructuredBuffer<float3> forces;
+RWStructuredBuffer<float> pressures;
+RWStructuredBuffer<float> densities;
+
+float DeltaTime;
+float InfluenceRadius;
+float Pi;
+float G;
+
+
+
+float sphKernel (float3 diff)
+{
+    float r2 = dot(diff, diff);
+    if (r2 < 0.0001)
+    {
+        return 1;
+    }
+    else
+    {
+        return 1 - sqrt(r2) / 0.1;
+    }
+}
+
+[numthreads(8,1,1)]
+void Integrate (uint3 id : SV_DispatchThreadID)
+{
+    float3 pos = particles[id.x];
+    float3 vel = velocities[id.x];
+    float3 force = forces[id.x];
+    float density = densities[id.x];
+    float pressure = pressures[id.x];
+
+    
+    particles[id.x] = pos + newVel * DeltaTime;
+    velocities[id.x] = vel + force * DeltaTime;
+    forces[id.x] = float3(0, 0, 0);
+    
+}
+
+[numthreads(8,1,1)]
+void ComputeForces (uint3 id : SV_DispatchThreadID)
+{
+    float3 pos = particles[id.x];
+    float3 vel = velocities[id.x];
+    float3 force = forces[id.x];
+    float density = densities[id.x];
+    float pressure = pressures[id.x];
+
+
+    forces[id.x] = G * float3(0, -1, 0);
+}
+
+[numthreads(8,1,1)]
+void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
+{
+    float3 pos = particles[id.x];
+    float3 vel = velocities[id.x];
+    float3 force = forces[id.x];
+    float density = densities[id.x];
+    float pressure = pressures[id.x];
+    
+    densities[id.x] = 1;
+    pressures[id.x] = 1;
+}
