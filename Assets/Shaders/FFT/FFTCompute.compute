@@ -1,0 +1,223 @@
+// OceanCompute.compute
+#pragma kernel InitSpectrum
+#pragma kernel UpdatePhase
+#pragma kernel FFT1D_Horizontal
+#pragma kernel FFT1D_Vertical
+#pragma kernel IFFT1D_Horizontal
+#pragma kernel IFFT1D_Vertical
+#pragma kernel FinalOutput
+
+Texture2D<float2> _InputSpectrum;   
+RWTexture2D<float2> _TempBuffer;  
+RWTexture2D<float> _HeightMap;  
+
+int _Resolution; // 纹理分辨率
+float _Time;     // 时间
+
+float rand(float2 coord)
+{
+    return frac(sin(dot(coord, float2(12.9898, 78.233))) * 43758.5453123);
+}
+
+[numthreads(8, 8, 1)]
+void InitSpectrum(uint3 id : SV_DispatchThreadID)
+{
+    uint x = id.x;
+    uint y = id.y;
+
+    if (x >= _Resolution || y >= _Resolution) return;
+
+    // wave vectors
+    float kx = (x - _Resolution / 2) * 2.0f * 3.14159265359 / _Resolution;
+    float ky = (y - _Resolution / 2) * 2.0f * 3.14159265359 / _Resolution;
+    float k = sqrt(kx * kx + ky * ky);
+
+    if (k == 0.0f)
+    {
+        _TempBuffer[id.xy] = float2(0.0f, 0.0f);
+        return;
+    }
+
+    // Wind Direction
+    float2 windDir = float2(1.0f, 0.0f);
+    float windFactor = dot(normalize(float2(kx, ky)), windDir);
+
+    // Phillips Spectrum
+    float windSpeed = 10.0f;
+    float L = windSpeed * windSpeed / 9.81f;
+    float damping = exp(-1.0f / (k * L * k * L));
+    float phillips = damping / (k * k * k * k) * windFactor * windFactor;
+    phillips = clamp(phillips, 0.0, 1.0);
+
+    // Time Factor
+    float omega = sqrt(9.81f * k);
+    float amplitude = sqrt(phillips) * cos(omega) * 0.1;
+
+    // 写入初始频谱 (复数值)
+    _TempBuffer[id.xy] = float2(amplitude, amplitude);
+}
+
+
+[numthreads(8, 8, 1)]
+void UpdatePhase(uint3 id : SV_DispatchThreadID)
+{
+    uint x = id.x;
+    uint y = id.y;
+
+    if (x >= _Resolution || y >= _Resolution) return;
+
+    // Read current spectrum from the _TempBuffer
+    float2 spectrumValue = _TempBuffer[id.xy];
+    float amplitude = length(spectrumValue); 
+    float phase = atan2(spectrumValue.y, spectrumValue.x);
+    
+    phase += _Time * sqrt(9.81f * length(float2(x, y))); 
+    
+    _TempBuffer[id.xy] = float2(amplitude * cos(phase), amplitude * sin(phase));
+}
+
+[numthreads(8, 8, 1)]
+void FFT1D_Horizontal(uint3 id : SV_DispatchThreadID)
+{
+    uint y = id.y;
+    uint N = _Resolution;
+
+    if (y >= N) return;
+
+    for (uint step = 1; step < N; step *= 2)
+    {
+        uint group = id.x / (2 * step);
+        uint offset = id.x % (2 * step);
+
+        if (group >= N / (2 * step)) continue;
+
+        uint index1 = group * (2 * step) + offset;
+        uint index2 = index1 + step;
+
+        float angle = -2.0 * 3.14159265359 * offset / (2 * step);
+        float2 twiddle = float2(cos(angle), sin(angle));
+
+        float2 value1 = _TempBuffer[uint2(index1, y)];
+        float2 value2 = _TempBuffer[uint2(index2, y)];
+
+        _TempBuffer[uint2(index1, y)] = value1 + twiddle * value2;
+        _TempBuffer[uint2(index2, y)] = value1 - twiddle * value2;
+    }
+
+    if (id.x < _Resolution) {
+        _TempBuffer[uint2(id.x, y)] /= _Resolution;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void FFT1D_Vertical(uint3 id : SV_DispatchThreadID)
+{
+    uint x = id.x;
+    uint N = _Resolution;
+
+    if (x >= N) return;
+
+    for (uint step = 1; step < N; step *= 2)
+    {
+        uint group = id.y / (2 * step);
+        uint offset = id.y % (2 * step);
+
+        if (group >= N / (2 * step)) continue;
+
+        uint index1 = group * (2 * step) + offset;
+        uint index2 = index1 + step;
+
+        float angle = -2.0 * 3.14159265359 * offset / (2 * step);
+        float2 twiddle = float2(cos(angle), sin(angle));
+
+        float2 value1 = _TempBuffer[uint2(x, index1)];
+        float2 value2 = _TempBuffer[uint2(x, index2)];
+
+        _TempBuffer[uint2(x, index1)] = value1 + twiddle * value2;
+        _TempBuffer[uint2(x, index2)] = value1 - twiddle * value2;
+    }
+
+    if (id.y < _Resolution) {
+        _TempBuffer[uint2(x, id.y)] /= _Resolution;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void IFFT1D_Horizontal(uint3 id : SV_DispatchThreadID)
+{
+    uint y = id.y;
+    uint N = _Resolution;
+
+    if (y >= N) return;
+
+    for (uint step = 1; step < N; step *= 2)
+    {
+        uint group = id.x / (2 * step);
+        uint offset = id.x % (2 * step);
+
+        if (group >= N / (2 * step)) continue;
+
+        uint index1 = group * (2 * step) + offset;
+        uint index2 = index1 + step;
+
+        float angle = 2.0 * 3.14159265359 * offset / (2 * step); // 旋转角度为正
+        float2 twiddle = float2(cos(angle), sin(angle));
+
+        float2 value1 = _TempBuffer[uint2(index1, y)];
+        float2 value2 = _TempBuffer[uint2(index2, y)];
+
+        _TempBuffer[uint2(index1, y)] = (value1 + twiddle * value2);
+        _TempBuffer[uint2(index2, y)] = (value1 - twiddle * value2);
+    }
+    
+    if (id.x < N)
+    {
+        _TempBuffer[uint2(id.x, y)] /= N;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void IFFT1D_Vertical(uint3 id : SV_DispatchThreadID)
+{
+    uint x = id.x;
+    uint N = _Resolution;
+
+    if (x >= N) return;
+
+    for (uint step = 1; step < N; step *= 2)
+    {
+        uint group = id.y / (2 * step);
+        uint offset = id.y % (2 * step);
+
+        if (group >= N / (2 * step)) continue;
+
+        uint index1 = group * (2 * step) + offset;
+        uint index2 = index1 + step;
+
+        float angle = 2.0 * 3.14159265359 * offset / (2 * step); // 旋转角度为正
+        float2 twiddle = float2(cos(angle), sin(angle));
+
+        float2 value1 = _TempBuffer[uint2(x, index1)];
+        float2 value2 = _TempBuffer[uint2(x, index2)];
+
+        _TempBuffer[uint2(x, index1)] = (value1 + twiddle * value2);
+        _TempBuffer[uint2(x, index2)] = (value1 - twiddle * value2);
+    }
+    
+    if (id.y < N)
+    {
+        _TempBuffer[uint2(x, id.y)] /= N;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void FinalOutput(uint3 id : SV_DispatchThreadID)
+{
+    uint x = id.x;
+    uint y = id.y;
+
+    if (x >= _Resolution || y >= _Resolution) return;
+
+    float2 complexValue = _TempBuffer[uint2(x, y)];
+    _HeightMap[id.xy] = complexValue.x; 
+}
