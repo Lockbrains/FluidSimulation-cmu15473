@@ -2,181 +2,443 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Numerics;
+using Unity.VisualScripting;
 using UnityEngine;
+using Vector2 = UnityEngine.Vector2;
 
 /// <summary>
 /// For generating the Wave Shape using FFT.
+/// Creator: Lingheng Tony Tao
 /// </summary>
 public class ShapeFFT : MonoBehaviour
 {
-    [SerializeField] private int resolution = 128;
+    [SerializeField] private int N = 256; // N
+    [SerializeField] private float L = 1000f; // Patch Size
+    [SerializeField] private float A = 0.01f; // Adjustment
+    [SerializeField] private float V = 40f; // Wind Speed
+    [SerializeField] private Vector2 windDirection = new Vector2(1, 1).normalized; 
     [SerializeField] private float frequency = 5f;
 
     [Header("For Spectrum Visualization")]
-    [SerializeField] private MeshRenderer spectrumPlaneMR;
-     
-    private float[,] spectrum;
-    private int spectrumSize;
-    private Texture2D spectrumTexture;
+    [SerializeField] private MeshRenderer h0kRenderer;
+    [SerializeField] private MeshRenderer h0MinusKRenderer;
+    [SerializeField] private MeshRenderer butterflyTextureRenderer;
+    [SerializeField] private MeshRenderer updateRenderer;
+    [SerializeField] private MeshRenderer FFT1DResultTexture;
     
-    // Start is called before the first frame update
+    // Private Variables 
+    private readonly float gravity = 9.81f;
+
+    private Complex[,] h0k;
+    private Complex[,] h0MinusK;
+
+    private Texture2D h0kTexture;
+    private Texture2D h0MinusKTexture;
+    private Texture2D butterflyTexture;
+
+    private float time = 0f;
+
     void Start()
     {
-        spectrum = new float[resolution, resolution];
-        spectrumTexture = new Texture2D(resolution, resolution);
-        //InitializeSpectrum();
-    }
+        InitializeSpectrum();
 
+        int[] bitReversedIndices = GenerateBitReversedIndices(N);
+        InitializeButterflyTexture(N, bitReversedIndices);
+        
+        butterflyTextureRenderer.material.SetTexture("_MainTex", butterflyTexture);
+        butterflyTexture.filterMode = FilterMode.Point;
+        //butterflyTexture.wrapMode = TextureWrapMode.Repeat;
+        butterflyTextureRenderer.material.SetTextureScale("_MainTex", new Vector2(1.0f, 1.0f / (Mathf.Log(N, 2))));
+        
+        h0kTexture = GenerateTexture(h0k);
+        h0MinusKTexture = GenerateTexture(h0MinusK);
+        
+        h0kRenderer.material.SetTexture("_MainTex", h0kTexture);
+        h0MinusKRenderer.material.SetTexture("_MainTex", h0MinusKTexture);
+    }
     // Update is called once per frame
     void Update()
     {
-        InitializeSpectrum();
-        GenerateSpectrum();
-        PerformFFT();
+        // Update Fourier Components
+        time += Time.deltaTime;
+
+        // Texture2D hktTexture = UpdateFourierComponents(h0k, h0MinusK, time);
+        //
+        // //updateRenderer.material.SetTexture("_MainTex", hktTexture); 
+        //
+        // Complex[,] hktData = ExtractDataFromTexture(hktTexture);
+        //
+        // // 1D Horizontal FFT
+        // PerformPingPongFFT(hktData);
+        //
+        // // 1D Vertical FFT
+        // PerformVerticalFFT(hktData);
+        //
+        // // Normalize
+        // NormalizeAndAdjust(hktData);
+        //
+        // // Visualize 1D FFT Result
+        // Texture2D fftResultTexture = GenerateTexture(hktData);
+        // FFT1DResultTexture.material.SetTexture("_MainTex", fftResultTexture);
     }
+    
+    #region Phase 1 Initialization
+    // Phase 1: Produces the spectrum textures containing \Tilde{h}_0(\bold{k}) and \Tilde{h}_0^*(-\bold{k})
+    // Page 24, 4.2.3
+    private (float, float) GenerateGaussianRandom()
+    {
+        float u1 = UnityEngine.Random.value;
+        float u2 = UnityEngine.Random.value;
+
+        float z0 = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) * Mathf.Cos(2.0f * Mathf.PI * u2);
+        float z1 = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) * Mathf.Sin(2.0f * Mathf.PI * u2);
+
+        return (z0, z1);
+    }
+    
     
     private void InitializeSpectrum()
     {
-        for (int x = 0; x < resolution; x++)
+        float windLength = V * V / gravity; // L = V^2/g;
+        h0k = new Complex[N, N];
+        h0MinusK = new Complex[N,N];
+        
+        for (int i = 0; i < N; i++)
         {
-            for (int y = 0; y < resolution; y++)
+            for (int j = 0; j < N; j++)
             {
-                spectrum[x, y] = spectrum[x, y] = Mathf.Sin(frequency * x + Time.time) * Mathf.Cos(frequency * y + Time.time); 
-            }
-        }
-
-        GenerateTextureFromSpectrum();
-    }
-
-    private void GenerateTextureFromSpectrum()
-    {
-        int size = spectrum.GetLength(0);
-
-        if (!spectrumTexture)
-        {
-            spectrumTexture = new Texture2D(size, size);
-        }
-        
-        Color[] pixels = new Color[size * size];
-        
-        for (int x = 0; x < size; x++)
-        {
-            for (int y = 0; y < size; y++)
-            {
-                float value = spectrum[x, y];
-                pixels[x + y * size] = new Color(value, value, value, 1.0f);
-            }
-        }
-        
-        spectrumTexture.SetPixels(pixels);
-        spectrumTexture.Apply();
-    }
-
-    public void GenerateSpectrum()
-    {
-        spectrumPlaneMR.material.mainTexture = spectrumTexture;
-    }
-
-    private void PerformFFT()
-    {
-        Complex[,] fftOutput = FFT2D(spectrum);
-        
-        int size = fftOutput.GetLength(0);
-
-        for (int x = 0; x < size; x++)
-        {
-            for (int y = 0; y < size; y++)
-            {
-                float magnitude = (float) fftOutput[x, y].Magnitude;
-                magnitude = Mathf.Clamp01(magnitude / 10f);
+                // Wave Vector \bold{k}
+                // Equation (4.2)
+                float kx = (2 * Mathf.PI * i - Mathf.PI * N ) / L;
+                float kz = (2 * Mathf.PI * j - Mathf.PI * N ) / L;
+                Vector2 k = new Vector2(kx, kz);
                 
-                spectrumTexture.SetPixel(x, y, new Color(magnitude, magnitude, magnitude, 1.0f));
+                // Clamp the size 
+                float kLength = k.magnitude;
+                if (kLength < 1e-6f) kLength = 1e-6f;
+
+                // Phillips Spectrum
+                // Equation (3.5)
+                float kDotW = Vector2.Dot(k.normalized, windDirection);
+                float kDotW2 = kDotW * kDotW;
+                float phillips = A / Mathf.Pow(kLength, 4) * Mathf.Exp(-1 / Mathf.Pow(kLength * windLength, 2));
+                phillips *= kDotW2;
+
+                // Suppressing very small waves
+                if (kLength < 1e-3f)
+                    phillips = 0;
+
+                // Generate Gaussian Random Numbers
+                var (gaussianReal, gaussianImag) = GenerateGaussianRandom();
+
+                // Initialize h0(k) and h0(-k)
+                h0k[i, j] = new Complex(gaussianReal * Mathf.Sqrt(phillips / 2), gaussianImag * Mathf.Sqrt(phillips / 2));
+                h0MinusK[i, j] = new Complex(h0k[i, j].Real, -h0k[i, j].Imaginary);
             }
         }
-        
-        spectrumTexture.Apply();
+    }
+
+    int[] GenerateBitReversedIndices(int N)
+    {
+        int[] indices = new int[N];
+        int log2N = Mathf.RoundToInt(Mathf.Log(N, 2));
+
+        for (int i = 0; i < N; i++)
+        {
+            int reversed = 0;
+            int index = i;
+
+            for (int j = 0; j < log2N; j++)
+            {
+                reversed = (reversed << 1) | (index & 1);
+                index >>= 1;
+            }
+
+            indices[i] = reversed;
+        }
+        return indices;
     }
     
-    #region 1D FFT
-    public static Complex[] FFT1D(Complex[] input)
+    void InitializeButterflyTexture(int N, int[] bitReversedIndices)
     {
-        int N = input.Length;
-        if (N <= 1) return input;
-
-        var even = new Complex[N / 2];
-        var odd  = new Complex[N / 2];
-        for (int i = 0; i < N / 2; i++)
+        int stages = Mathf.RoundToInt(Mathf.Log(N, 2)); // Total Stage (log_2(N))
+        butterflyTexture = new Texture2D(stages, N, TextureFormat.RGBAFloat, false);
+        
+        for (int y = 0; y < butterflyTexture.height; y++)
         {
-            even[i] = input[i * 2];
-            odd [i] = input[i * 2 + 1];
+            for (int x = 0; x < butterflyTexture.width; x++)
+            {
+                butterflyTexture.SetPixel(x, y, new Color(0, 0, 0, 0)); // 初始化为全黑
+            }
         }
+        butterflyTexture.Apply();
 
-        var fftEven = FFT1D(even);
-        var fftOdd = FFT1D(odd);
-
-        var result = new Complex[N];
-        for (int k = 0; k < N / 2; k++)
+        for (int x = 0; x < stages; x++)
         {
-            Complex t = Complex.FromPolarCoordinates(1.0, -2.0 * Math.PI * k / N) * fftOdd[k];
-            result[k] = fftEven[k] + t;
-            result[k + N / 2] = fftEven[k] - t;
-        }
+            int butterflySpan = 1 << x; // current span
 
-        return result;
+            for (int y = 0; y < N; y++)
+            {
+                // twiddle factor
+                // Equation (4.6)
+                float k = (y * (float)N / (1 << (x + 1))) % N;
+                float twiddleReal = Mathf.Cos(2.0f * Mathf.PI * k / N);
+                float twiddleImag = Mathf.Sin(2.0f * Mathf.PI * k / N);
+
+                bool butterflyWing = ((y % (1 << (x + 1))) < butterflySpan); // wing mark
+
+                // int flippedStage = stages - x - 1;
+                // first stage, bit reversed indices
+                if (x == 0)
+                {
+                    if (butterflyWing)
+                    {
+                        butterflyTexture.SetPixel(x, y, new Color(
+                            twiddleReal,
+                            twiddleImag,
+                            bitReversedIndices[y],
+                            bitReversedIndices[y + 1]
+                        ));
+                    }
+                    else
+                    {
+                        butterflyTexture.SetPixel(x, y, new Color(
+                            twiddleReal,
+                            twiddleImag,
+                            bitReversedIndices[y - 1],
+                            bitReversedIndices[y]
+                        ));
+                    }
+                }
+                else
+                {
+                    if (butterflyWing)
+                    {
+                        butterflyTexture.SetPixel(x, y, new Color(
+                            twiddleReal,
+                            twiddleImag,
+                            y,
+                            y + butterflySpan
+                        ));
+                    }
+                    else
+                    {
+                        butterflyTexture.SetPixel(x, y, new Color(
+                            twiddleReal,
+                            twiddleImag,
+                            y - butterflySpan,
+                            y
+                        ));
+                    }
+                }
+            }
+        }
+        butterflyTexture.Apply();
     }
+    
+    private Texture2D GenerateTexture(Complex[,] data)
+    {
+        Texture2D texture = new Texture2D(N, N, TextureFormat.RGFloat, false);
 
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N; j++)
+            {
+                float real = (float)data[i, j].Real;
+                float imag = (float)data[i, j].Imaginary;
+                // The real part of h0(k) is stored in the red channel
+                // while the imaginary part is stored in the green channel
+                texture.SetPixel(i, j, new Color(real, imag, 0));
+            }
+        }
+
+        texture.Apply();
+        return texture;
+    }
+    
     #endregion
     
-    #region 2D FFT
-
-    private Complex[,] FFT2D(float[,] input)
+    #region Phase 2 Height Amplitude Fourier Components
+    Texture2D UpdateFourierComponents(Complex[,] h0k, Complex[,] h0MinusK, float time)
     {
-        int size = input.GetLength(0);
-        Complex[,] complexData = new Complex[size, size];
+        Texture2D hktTexture = new Texture2D(N, N, TextureFormat.RGFloat, false);
 
-        // initialize input data
-        for (int x = 0; x < size; x++)
+        for (int i = 0; i < N; i++)
         {
-            for (int y = 0; y < size; y++)
+            for (int j = 0; j < N; j++)
             {
-                complexData[x, y] = new Complex(input[x, y], 0);
+                // Wave Vector \bold{k}
+                // Equation (4.2)
+                float kx = (2 * Mathf.PI * i - Mathf.PI * N ) / L;
+                float kz = (2 * Mathf.PI * j - Mathf.PI * N ) / L;
+                Vector2 k = new Vector2(kx, kz);
+
+                float kLength = k.magnitude;
+                if (kLength < 1e-6f) kLength = 1e-6f;
+
+                // frequency omega(k)
+                // Equation (3.7)
+                float omega = Mathf.Sqrt(9.8f * kLength);
+
+                // Fourier Component
+                // Equation (3.8)
+                Complex expPositive = h0k[i, j] * Complex.Exp(new Complex(0, omega * time));
+                Complex expNegative = h0MinusK[i, j] * Complex.Exp(new Complex(0, -omega * time));
+                Complex hkt = expPositive + expNegative;
+
+                // Write into Texture
+                hktTexture.SetPixel(i, j, new Color((float)hkt.Real, (float)hkt.Imaginary, 0));
             }
         }
-        
-        // run FFT1D for every row
-        for (int y = 0; y < size; y++)
-        {
-            Complex[] row = new Complex[size];
-            for (int x = 0; x < size; x++)
-            {
-                row[x] = complexData[x, y];
-            }
-            
-            Complex[] fftRow = FFT1D(row);
-            for (int x = 0; x < size; x++)
-            {
-                complexData[x, y] = fftRow[x];
-            }
-        }
-        
-        // run FFT1D for every col
-        for (int x = 0; x < size; x++)
-        {
-            Complex[] column = new Complex[size];
-            for (int y = 0; y < size; y++)
-            {
-                column[y] = complexData[x, y];
-            }
-            
-            Complex[] fftColumn = FFT1D(column);
-            for (int y = 0; y < size; y++)
-            {
-                complexData[x, y] = fftColumn[y]; 
-            }
-        }
-        
-        return complexData;
+
+        hktTexture.Apply();
+        return hktTexture;
     }
     
+    #endregion
+    
+    #region Phase 3 Horitontal 1D FFT
+    
+    
+    Complex[,] ExtractDataFromTexture(Texture2D texture)
+    {
+        int N = texture.width;
+        Complex[,] data = new Complex[N, N];
+
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N; j++)
+            {
+                Color color = texture.GetPixel(i, j);
+                data[i, j] = new Complex(color.r, color.g); 
+            }
+        }
+
+        return data;
+    }
+    
+    private void Perform1DFFT(Complex[,] data, int direction)
+    {
+        int N = data.GetLength(1); 
+        int stages = Mathf.RoundToInt(Mathf.Log(N, 2)); 
+
+        // Butterfly Operations
+        for (int s = 0; s < stages; s++)
+        {
+            int m = 1 << s; 
+            int span = m * 2; 
+            // Twiddle Factor
+            // Equation (2.10)
+            Complex Wm = Complex.Exp(new Complex(0, -direction * 2.0 * Mathf.PI / span));
+
+            for (int k = 0; k < N; k += span)
+            {
+                Complex W = Complex.One;
+
+                for (int j = 0; j < m; j++)
+                {
+                    for (int row = 0; row < data.GetLength(0); row++)
+                    {
+                        Complex t = W * data[row, k + j + m];
+                        Complex u = data[row, k + j];
+
+                        data[row, k + j] = u + t;
+                        data[row, k + j + m] = u - t;
+                    }
+
+                    W *= Wm; 
+                }
+            }
+        }
+    }
+    
+    void PerformHorizontalFFT(Complex[,] data, int stage)
+    {
+        int N = data.GetLength(1);
+        for (int row = 0; row < data.GetLength(0); row++)
+        {
+            for (int i = 0; i < N; i++)
+            {
+                // read twiddle factor and index from butterfly texture
+                Color butterflyData = butterflyTexture.GetPixel(i, stage);
+                float twiddleReal = butterflyData.r;
+                float twiddleImag = butterflyData.g;
+                int topIndex = Mathf.FloorToInt(butterflyData.b);
+                int bottomIndex = Mathf.FloorToInt(butterflyData.a);
+
+                // butterfly operation
+                Complex top = data[row, topIndex];
+                Complex bottom = data[row, bottomIndex];
+                Complex twiddle = new Complex(twiddleReal, twiddleImag);
+
+                data[row, topIndex] = top + twiddle * bottom;
+                data[row, bottomIndex] = top - twiddle * bottom;
+            }
+        }
+    }
+    
+    void PerformPingPongFFT(Complex[,] data)
+    {
+        int stages = Mathf.RoundToInt(Mathf.Log(data.GetLength(1), 2));
+
+        for (int stage = 0; stage < stages; stage++)
+        {
+            PerformHorizontalFFT(data, stage);
+        }
+    }
+    
+    #endregion
+    
+    #region Phase 4 Vertical 1D FFT
+    void PerformVerticalFFT(Complex[,] data)
+    {
+        Complex[,] transposedData = TransposeMatrix(data);
+        
+        PerformPingPongFFT(transposedData);
+        
+        Complex[,] result = TransposeMatrix(transposedData);
+
+        for (int i = 0; i < data.GetLength(0); i++)
+        {
+            for (int j = 0; j < data.GetLength(1); j++)
+            {
+                data[i, j] = result[i, j];
+            }
+        }
+    }
+
+    Complex[,] TransposeMatrix(Complex[,] data)
+    {
+        int rows = data.GetLength(0);
+        int cols = data.GetLength(1);
+        Complex[,] transposed = new Complex[cols, rows];
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                transposed[j, i] = data[i, j];
+            }
+        }
+        return transposed;
+    }
+    #endregion
+    
+    #region Phase 5 Inversion and Permutation
+    void NormalizeAndAdjust(Complex[,] data)
+    {
+        int N = data.GetLength(0);
+
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N; j++)
+            {
+                data[i, j] /= (N * N);
+                
+                int sign = ((i + j) % 2 == 0) ? 1 : -1;
+                data[i, j] *= sign;
+            }
+        }
+    }
     #endregion
 } 
