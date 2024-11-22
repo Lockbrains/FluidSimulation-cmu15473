@@ -36,6 +36,8 @@ public class ShapeFFT : MonoBehaviour
     private Texture2D h0MinusKTexture;
     private Texture2D butterflyTexture;
 
+    private Texture2D pingpong0, pingpong1;
+
     private float time = 0f;
 
     void Start()
@@ -44,6 +46,8 @@ public class ShapeFFT : MonoBehaviour
 
         int[] bitReversedIndices = GenerateBitReversedIndices(N);
         InitializeButterflyTexture(N, bitReversedIndices);
+
+        InitializePingPongTextures(N);
         
         butterflyTextureRenderer.material.SetTexture("_MainTex", butterflyTexture);
         butterflyTexture.filterMode = FilterMode.Point;
@@ -51,7 +55,10 @@ public class ShapeFFT : MonoBehaviour
         //butterflyTextureRenderer.material.SetTextureScale("_MainTex", new Vector2(1.0f, 1.0f / (Mathf.Log(N, 2))));
         
         h0kTexture = GenerateTexture(h0k);
+        h0kTexture.filterMode = FilterMode.Point;
+        
         h0MinusKTexture = GenerateTexture(h0MinusK);
+        h0MinusKTexture.filterMode = FilterMode.Point; 
         
         h0kRenderer.material.SetTexture("_MainTex", h0kTexture);
         h0MinusKRenderer.material.SetTexture("_MainTex", h0MinusKTexture);
@@ -64,13 +71,22 @@ public class ShapeFFT : MonoBehaviour
 
         Texture2D hktTexture = UpdateFourierComponents(h0k, h0MinusK, time);
         
+        CopyTextureData(hktTexture, pingpong1);
+
         //updateRenderer.material.SetTexture("_MainTex", hktTexture); 
         
-        Complex[,] hktData = ExtractDataFromTexture(hktTexture);
+        //Complex[,] hktData = ExtractDataFromTexture(hktTexture);
+        
+        
+        // 执行水平 FFT
+        PerformHorizontalFFT();
+
+        // 执行垂直 FFT
+        PerformVerticalFFT();
         
         // Visualize 1D FFT Result
-        Texture2D fftResultTexture = GenerateTexture(hktData);
-        FFT1DResultTexture.material.SetTexture("_MainTex", fftResultTexture);
+        // Texture2D fftResultTexture = GenerateTexture(hktData);
+        FFT1DResultTexture.material.SetTexture("_MainTex", pingpong1);
     }
     
     #region Phase 1 Initialization
@@ -129,7 +145,7 @@ public class ShapeFFT : MonoBehaviour
         }
     }
 
-    int[] GenerateBitReversedIndices(int N)
+    private int[] GenerateBitReversedIndices(int N)
     {
         int[] indices = new int[N];
         int log2N = Mathf.RoundToInt(Mathf.Log(N, 2));
@@ -150,7 +166,7 @@ public class ShapeFFT : MonoBehaviour
         return indices;
     }
     
-    void InitializeButterflyTexture(int N, int[] bitReversedIndices)
+    private void InitializeButterflyTexture(int N, int[] bitReversedIndices)
     {
         int stages = Mathf.RoundToInt(Mathf.Log(N, 2)); // Total Stage (log_2(N))
         butterflyTexture = new Texture2D(stages, N, TextureFormat.RGBAFloat, false);
@@ -159,7 +175,7 @@ public class ShapeFFT : MonoBehaviour
         {
             for (int x = 0; x < butterflyTexture.width; x++)
             {
-                butterflyTexture.SetPixel(x, y, new Color(0, 0, 0, 0)); // 初始化为全黑
+                butterflyTexture.SetPixel(x, y, new Color(0, 0, 0, 0)); 
             }
         }
         butterflyTexture.Apply();
@@ -247,6 +263,27 @@ public class ShapeFFT : MonoBehaviour
         return texture;
     }
     
+    private void InitializePingPongTextures(int N)
+    {
+        pingpong0 = new Texture2D(N, N, TextureFormat.RGBAFloat, false);
+        pingpong0.filterMode = FilterMode.Point; 
+        pingpong0.wrapMode = TextureWrapMode.Clamp;
+        
+        pingpong1 = new Texture2D(N, N, TextureFormat.RGBAFloat, false);
+        pingpong1.filterMode = FilterMode.Point; 
+        pingpong1.wrapMode = TextureWrapMode.Clamp; 
+        
+        Color[] blackPixels = new Color[N * N];
+        for (int i = 0; i < blackPixels.Length; i++)
+        {
+            blackPixels[i] = new Color(0, 0, 0, 0); 
+        }
+        pingpong0.SetPixels(blackPixels);
+        pingpong0.Apply();
+        pingpong1.SetPixels(blackPixels);
+        pingpong1.Apply();
+    }
+    
     #endregion
     
     #region Phase 2 Height Amplitude Fourier Components
@@ -289,7 +326,7 @@ public class ShapeFFT : MonoBehaviour
     #endregion
     
     #region Phase 3 Horitontal 1D FFT
-    Complex[,] ExtractDataFromTexture(Texture2D texture)
+    private Complex[,] ExtractDataFromTexture(Texture2D texture)
     {
         int N = texture.width;
         Complex[,] data = new Complex[N, N];
@@ -305,12 +342,132 @@ public class ShapeFFT : MonoBehaviour
 
         return data;
     }
+
+    Complex LoadComplexFromTexture(Texture2D texture, int x, int y)
+    {
+        Color pixel = texture.GetPixel(x, y);
+        return new Complex(pixel.r, pixel.g); 
+    }
     
-   
+    void StoreComplexToTexture(Texture2D texture, int x, int y, Color c)
+    {
+        texture.SetPixel(x, y, c);
+        texture.Apply(); 
+    }
+    
+    void CopyTextureData(Texture2D source, Texture2D target)
+    {
+        for (int i = 0; i < N; i++)
+        {
+            for (int j = 0; j < N; j++)
+            {
+                Color color = source.GetPixel(i, j);
+                target.SetPixel(i, j, color);
+            }
+        }
+        target.Apply();
+    }
+    
+    private void HorizontalButterflies(int stage, int pingpong)
+    {
+        // Phase 3 Horitonzal 1D FFT
+        for (int y = 0; y < N; y++)
+        {
+            for (int x = 0; x < N; x++)
+            {
+                Color data = butterflyTexture.GetPixel(stage, x);
+                
+                int px = Mathf.FloorToInt(data.b);
+                int qx = Mathf.FloorToInt(data.a);
+                
+                Complex p, q;
+                if (pingpong == 0)
+                {
+                    p = LoadComplexFromTexture(pingpong0, px, y);
+                    q = LoadComplexFromTexture(pingpong0, qx, y);
+                    Complex w = new Complex(data.r, data.g);
+                    
+                    Complex H = p + w * q;
+                    StoreComplexToTexture(pingpong1, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
+                }
+                else
+                {
+                    p = LoadComplexFromTexture(pingpong1, px, y);
+                    q = LoadComplexFromTexture(pingpong1, qx, y);
+                    Complex w = new Complex(data.r, data.g);
+                    
+                    Complex H = p + w * q;
+                    StoreComplexToTexture(pingpong0, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
+                    
+                }
+            }
+        }
+    }
+    
+    void PerformHorizontalFFT()
+    {
+        int stages = Mathf.RoundToInt(Mathf.Log(N, 2));
+        int pingpong = 1;
+
+        for (int stage = 0; stage < stages; stage++)
+        {
+            HorizontalButterflies(stage, pingpong);
+            pingpong = 1 - pingpong;
+        }
+    }
+    
+    
     
     #endregion
     
     #region Phase 4 Vertical 1D FFT
+    void PerformVerticalFFT()
+    {
+        int stages = Mathf.RoundToInt(Mathf.Log(N, 2));
+        int pingpong = 0;
+
+        for (int stage = 0; stage < stages; stage++)
+        {
+            VerticalButterflies(stage, pingpong);
+            pingpong = 1 - pingpong; 
+        }
+    }
+    
+    private void VerticalButterflies(int stage, int pingpong)
+    {
+        for (int x = 0; x < N; x++)
+        {
+            for (int y = 0; y < N; y++) 
+            {
+                Color data = butterflyTexture.GetPixel(stage, y);
+ 
+                int py = Mathf.FloorToInt(data.b); 
+                int qy = Mathf.FloorToInt(data.a);
+                
+                Complex p, q;
+                if (pingpong == 0)
+                {
+                    p = LoadComplexFromTexture(pingpong0, x, py);
+                    q = LoadComplexFromTexture(pingpong0, x, qy);
+                    
+                    Complex w = new Complex(data.r, data.g);
+                    
+                    Complex H = p + w * q;
+                    StoreComplexToTexture(pingpong1, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
+                }
+                else
+                {
+                    p = LoadComplexFromTexture(pingpong1, x, py);
+                    q = LoadComplexFromTexture(pingpong1, x, qy);
+                    
+                    Complex w = new Complex(data.r, data.g);
+                    
+                    Complex H = p + w * q;
+                    StoreComplexToTexture(pingpong1, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
+                }
+            }
+        }
+    }
     
     #endregion
     
