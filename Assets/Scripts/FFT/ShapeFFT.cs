@@ -48,7 +48,7 @@ public class ShapeFFT : MonoBehaviour
         butterflyTextureRenderer.material.SetTexture("_MainTex", butterflyTexture);
         butterflyTexture.filterMode = FilterMode.Point;
         //butterflyTexture.wrapMode = TextureWrapMode.Repeat;
-        butterflyTextureRenderer.material.SetTextureScale("_MainTex", new Vector2(1.0f, 1.0f / (Mathf.Log(N, 2))));
+        //butterflyTextureRenderer.material.SetTextureScale("_MainTex", new Vector2(1.0f, 1.0f / (Mathf.Log(N, 2))));
         
         h0kTexture = GenerateTexture(h0k);
         h0MinusKTexture = GenerateTexture(h0MinusK);
@@ -62,24 +62,15 @@ public class ShapeFFT : MonoBehaviour
         // Update Fourier Components
         time += Time.deltaTime;
 
-        // Texture2D hktTexture = UpdateFourierComponents(h0k, h0MinusK, time);
-        //
-        // //updateRenderer.material.SetTexture("_MainTex", hktTexture); 
-        //
-        // Complex[,] hktData = ExtractDataFromTexture(hktTexture);
-        //
-        // // 1D Horizontal FFT
-        // PerformPingPongFFT(hktData);
-        //
-        // // 1D Vertical FFT
-        // PerformVerticalFFT(hktData);
-        //
-        // // Normalize
-        // NormalizeAndAdjust(hktData);
-        //
-        // // Visualize 1D FFT Result
-        // Texture2D fftResultTexture = GenerateTexture(hktData);
-        // FFT1DResultTexture.material.SetTexture("_MainTex", fftResultTexture);
+        Texture2D hktTexture = UpdateFourierComponents(h0k, h0MinusK, time);
+        
+        //updateRenderer.material.SetTexture("_MainTex", hktTexture); 
+        
+        Complex[,] hktData = ExtractDataFromTexture(hktTexture);
+        
+        // Visualize 1D FFT Result
+        Texture2D fftResultTexture = GenerateTexture(hktData);
+        FFT1DResultTexture.material.SetTexture("_MainTex", fftResultTexture);
     }
     
     #region Phase 1 Initialization
@@ -298,8 +289,6 @@ public class ShapeFFT : MonoBehaviour
     #endregion
     
     #region Phase 3 Horitontal 1D FFT
-    
-    
     Complex[,] ExtractDataFromTexture(Texture2D texture)
     {
         int N = texture.width;
@@ -317,128 +306,15 @@ public class ShapeFFT : MonoBehaviour
         return data;
     }
     
-    private void Perform1DFFT(Complex[,] data, int direction)
-    {
-        int N = data.GetLength(1); 
-        int stages = Mathf.RoundToInt(Mathf.Log(N, 2)); 
-
-        // Butterfly Operations
-        for (int s = 0; s < stages; s++)
-        {
-            int m = 1 << s; 
-            int span = m * 2; 
-            // Twiddle Factor
-            // Equation (2.10)
-            Complex Wm = Complex.Exp(new Complex(0, -direction * 2.0 * Mathf.PI / span));
-
-            for (int k = 0; k < N; k += span)
-            {
-                Complex W = Complex.One;
-
-                for (int j = 0; j < m; j++)
-                {
-                    for (int row = 0; row < data.GetLength(0); row++)
-                    {
-                        Complex t = W * data[row, k + j + m];
-                        Complex u = data[row, k + j];
-
-                        data[row, k + j] = u + t;
-                        data[row, k + j + m] = u - t;
-                    }
-
-                    W *= Wm; 
-                }
-            }
-        }
-    }
-    
-    void PerformHorizontalFFT(Complex[,] data, int stage)
-    {
-        int N = data.GetLength(1);
-        for (int row = 0; row < data.GetLength(0); row++)
-        {
-            for (int i = 0; i < N; i++)
-            {
-                // read twiddle factor and index from butterfly texture
-                Color butterflyData = butterflyTexture.GetPixel(i, stage);
-                float twiddleReal = butterflyData.r;
-                float twiddleImag = butterflyData.g;
-                int topIndex = Mathf.FloorToInt(butterflyData.b);
-                int bottomIndex = Mathf.FloorToInt(butterflyData.a);
-
-                // butterfly operation
-                Complex top = data[row, topIndex];
-                Complex bottom = data[row, bottomIndex];
-                Complex twiddle = new Complex(twiddleReal, twiddleImag);
-
-                data[row, topIndex] = top + twiddle * bottom;
-                data[row, bottomIndex] = top - twiddle * bottom;
-            }
-        }
-    }
-    
-    void PerformPingPongFFT(Complex[,] data)
-    {
-        int stages = Mathf.RoundToInt(Mathf.Log(data.GetLength(1), 2));
-
-        for (int stage = 0; stage < stages; stage++)
-        {
-            PerformHorizontalFFT(data, stage);
-        }
-    }
+   
     
     #endregion
     
     #region Phase 4 Vertical 1D FFT
-    void PerformVerticalFFT(Complex[,] data)
-    {
-        Complex[,] transposedData = TransposeMatrix(data);
-        
-        PerformPingPongFFT(transposedData);
-        
-        Complex[,] result = TransposeMatrix(transposedData);
-
-        for (int i = 0; i < data.GetLength(0); i++)
-        {
-            for (int j = 0; j < data.GetLength(1); j++)
-            {
-                data[i, j] = result[i, j];
-            }
-        }
-    }
-
-    Complex[,] TransposeMatrix(Complex[,] data)
-    {
-        int rows = data.GetLength(0);
-        int cols = data.GetLength(1);
-        Complex[,] transposed = new Complex[cols, rows];
-
-        for (int i = 0; i < rows; i++)
-        {
-            for (int j = 0; j < cols; j++)
-            {
-                transposed[j, i] = data[i, j];
-            }
-        }
-        return transposed;
-    }
+    
     #endregion
     
     #region Phase 5 Inversion and Permutation
-    void NormalizeAndAdjust(Complex[,] data)
-    {
-        int N = data.GetLength(0);
-
-        for (int i = 0; i < N; i++)
-        {
-            for (int j = 0; j < N; j++)
-            {
-                data[i, j] /= (N * N);
-                
-                int sign = ((i + j) % 2 == 0) ? 1 : -1;
-                data[i, j] *= sign;
-            }
-        }
-    }
+    
     #endregion
 } 
