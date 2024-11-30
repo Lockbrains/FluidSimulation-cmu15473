@@ -28,19 +28,24 @@ public class ShapeFFT : MonoBehaviour
     [SerializeField] private MeshRenderer pingpongRenderer0, pingpongRenderer1;
     [SerializeField] private MeshRenderer pingpongRendererX0, pingpongRendererX1;
     [SerializeField] private MeshRenderer pingpongRendererZ0, pingpongRendererZ1;
-    [SerializeField] private MeshRenderer FFT1DResultTexture;
+    [SerializeField] private MeshRenderer foamTexture;
     [SerializeField] private MeshRenderer FFTResultRenderer;
     
     [Header("For Water Rendering")]
     [SerializeField] private MeshRenderer watermeshRenderer;
+    [SerializeField] private float foamThreshold = 0.5f;
+    [SerializeField] private float foamDecayRate = 0.1f;
+    
 
     [Header("Compute Shaders")]
+    [Tooltip("Don't use CPU. Will Crash.")]
     [SerializeField] private bool useGPU = true;
     [SerializeField] private ComputeShader fftInitShader;
     [SerializeField] private ComputeShader fourierComponentShader;
     [SerializeField] private ComputeShader butterflyTextureShader;
     [SerializeField] private ComputeShader butterflyComputeShader;
     [SerializeField] private ComputeShader inversionComputeShader;
+    [SerializeField] private ComputeShader foamComputeShader;
     // Private Variables 
     private readonly float gravity = 9.81f;
     
@@ -64,13 +69,18 @@ public class ShapeFFT : MonoBehaviour
     private RenderTexture pingpong0RT_Dy, pingpong1RT_Dy;
     private RenderTexture pingpong0RT_Dz, pingpong1RT_Dz;
     private RenderTexture displacementRT;
+
+    [SerializeField] private Texture2D perlinNoise;
     
     private RenderTexture hktDy, hktDx, hktDz;
 
+    private RenderTexture foamRT;
+    
     private int hktHandle;
     private int butterflyTextureHandle;
     private int butterflyComputeHandle;
     private int inversionHandle;
+    private int foamHandle;
     
     private float time = 0f;
 
@@ -164,6 +174,10 @@ public class ShapeFFT : MonoBehaviour
             watermeshRenderer.material.SetTexture("_DisplacementX", hktDx);
             watermeshRenderer.material.SetTexture("_DisplacementZ", hktDz);
             watermeshRenderer.material.SetTexture("_HeightMap", displacementRT);
+            
+            // Foam
+            foamComputeShader.Dispatch(foamHandle, threadGroups, threadGroups, 1);
+            watermeshRenderer.material.SetTexture("_FoamMap", foamRT);
         }
         else
         {
@@ -172,17 +186,16 @@ public class ShapeFFT : MonoBehaviour
 
             CopyTextureData(hktTexture, pingpong1);
 
-            //updateRenderer.material.SetTexture("_MainTex", hktTexture); 
+            // updateRenderer.material.SetTexture("_MainTex", hktTexture); 
 
-            //Complex[,] hktData = ExtractDataFromTexture(hktTexture);
+            // Complex[,] hktData = ExtractDataFromTexture(hktTexture);
 
-            PerformHorizontalFFT();
-            //
+            // PerformHorizontalFFT();
+            
             // PerformVerticalFFT();
 
             // Visualize 1D FFT Result
             // Texture2D fftResultTexture = GenerateTexture(hktData);
-            FFT1DResultTexture.material.SetTexture("_MainTex", pingpong1);
         }
     }
     
@@ -297,12 +310,6 @@ public class ShapeFFT : MonoBehaviour
         fftInitShader.SetFloat("V", V);
         fftInitShader.SetFloats("windDirection", new float[] { windDirection.x, windDirection.y });
         
-        // pass in noise textures
-        fftInitShader.SetTexture(kernel, "NoiseR0", GenerateNoiseTexture(N));
-        fftInitShader.SetTexture(kernel, "NoiseI0", GenerateNoiseTexture(N));
-        fftInitShader.SetTexture(kernel, "NoiseR1", GenerateNoiseTexture(N));
-        fftInitShader.SetTexture(kernel, "NoiseI1", GenerateNoiseTexture(N));
-        
         // Dispatch the shader
         int threadGroupSize = Mathf.CeilToInt(N / 16.0f);
         fftInitShader.Dispatch(kernel, threadGroupSize, threadGroupSize, 1);
@@ -312,15 +319,19 @@ public class ShapeFFT : MonoBehaviour
         h0MinusKRenderer.material.SetTexture("_MainTex", h0MinusKRenderTexture);
     }
 
-    private RenderTexture CreateRenderTexture(int width, int height, bool interpolate = false) {
+    private RenderTexture CreateRenderTexture(int width, int height, bool interpolate = false, bool trillinear = false) {
         RenderTexture rt = new RenderTexture(width, height, 0, RenderTextureFormat.ARGBFloat);
         if (!interpolate)
         {
             rt.filterMode = FilterMode.Point;
         }
-        else
+        else if (!trillinear)
         {
             rt.filterMode = FilterMode.Bilinear;
+        }
+        else
+        {
+            rt.filterMode = FilterMode.Trilinear;
         }
         rt.enableRandomWrite = true;
         rt.Create();
@@ -346,6 +357,8 @@ public class ShapeFFT : MonoBehaviour
         pingpong1RT_Dz = CreateRenderTexture(N, N);
         
         displacementRT = CreateRenderTexture(N, N, true);
+        foamRT = CreateRenderTexture(N, N, true, true);
+        foamTexture.material.SetTexture("_MainTex", foamRT);
     }
 
     private void InitializeOtherComputeShaders()
@@ -415,6 +428,16 @@ public class ShapeFFT : MonoBehaviour
         inversionComputeShader.SetTexture(inversionHandle, "pingpong0_Dz", pingpong0RT_Dz);
         inversionComputeShader.SetTexture(inversionHandle, "pingpong1_Dz", pingpong1RT_Dz);
         inversionComputeShader.SetTexture(inversionHandle, "displacement", displacementRT);
+        
+        // Foam
+        foamHandle = foamComputeShader.FindKernel("GenerateFoam");
+        foamComputeShader.SetTexture(foamHandle, "displacement", displacementRT);
+        foamComputeShader.SetTexture(foamHandle, "foamTexture", foamRT);
+        foamComputeShader.SetTexture(foamHandle, "perlinNoise", perlinNoise);
+        foamComputeShader.SetFloat("threshold", foamThreshold);
+        foamComputeShader.SetFloat("decayRate", foamDecayRate);
+        foamComputeShader.SetFloat("deltaTime", Time.deltaTime);
+        foamComputeShader.SetInt("N", N);
     }
     private int[] GenerateBitReversedIndices(int N)
     {

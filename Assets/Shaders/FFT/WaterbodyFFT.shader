@@ -88,7 +88,7 @@ Shader "FluidSimulation/VertexDisplacement"
                 float diff = max(0.0, dot(normal, lightDir));
                 float3 diffuse = diff * _LightColor.rgb;
                 
-                float3 viewDir = normalize(-i.worldPos); 
+                float3 viewDir = normalize(-i.worldPos - _WorldSpaceCameraPos); 
                 float3 reflectDir = reflect(-lightDir, normal);
                 float spec = pow(max(dot(viewDir, reflectDir), 0.0), _SpecularPower);
                 float3 specular = spec * _LightColor.rgb;

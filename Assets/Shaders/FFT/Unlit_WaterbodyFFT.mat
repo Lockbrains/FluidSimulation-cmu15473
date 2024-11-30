@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Unlit_WaterbodyFFT
-  m_Shader: {fileID: 4800000, guid: d206c4ee86e9f42f8bf74094aa22a825, type: 3}
+  m_Shader: {fileID: 4800000, guid: b3b83fa662dda4076921c5c42f70b742, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -31,6 +31,10 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _FoamMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _HeightMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -41,10 +45,26 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _ChoppyFactor: 0.4
-    - _DisplacementScale: 0.3
-    - _SpecularPower: 30
+    - _Alpha: 0.8
+    - _ChoppyFactor: 0.3
+    - _DisplacementScale: 0.07
+    - _Emission: 6
+    - _Emission1: 50
+    - _Emission2: 20
+    - _Emission3: 1.37
+    - _FoamThreshold: 0.95
+    - _FoamThreshold1: 0.93
+    - _FoamThreshold2: 0.91
+    - _FoamThreshold3: 0.87
+    - _Glossiness: 0.8
+    - _Metallic: 0.5
+    - _SpecularPower: 1
     m_Colors:
-    - _AmbientColor: {r: 0.24163404, g: 0.24623236, b: 0.2830189, a: 1}
+    - _AmbientColor: {r: 0.6011926, g: 0.6071111, b: 0.6603774, a: 1}
+    - _Color: {r: 0.4960395, g: 0.5868159, b: 0.6698113, a: 1}
+    - _FoamColor: {r: 1, g: 1, b: 1, a: 1}
+    - _FoamColor1: {r: 1, g: 1, b: 1, a: 1}
+    - _FoamColor2: {r: 0.5444999, g: 0.68248487, b: 0.7169812, a: 1}
+    - _FoamColor3: {r: 0.2761659, g: 0.4173138, b: 0.5471698, a: 1}
     - _LightColor: {r: 0.3443396, g: 0.6847334, b: 1, a: 1}
   m_BuildTextureStacks: []

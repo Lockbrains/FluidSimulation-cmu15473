@@ -1,0 +1,62 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel GenerateFoam
+
+// Input Textures
+Texture2D<float4> displacement;
+Texture2D<float4> perlinNoise;
+
+// Output Texture
+RWTexture2D<float4> foamTexture;
+
+cbuffer Parameters
+{
+    float threshold;
+    float decayRate;
+    float deltaTime;
+    int N;
+}
+
+float rand(uint2 seed)
+{
+    uint n = seed.x * 15731 + seed.y * 789221 + 1376312589;
+    n = (n >> 13) ^ n;
+    return frac((n * (n * n * 15731 + 789221) + 1376312589) * 1.0 / 4294967296.0);
+}
+
+[numthreads(16,16,1)]
+void GenerateFoam (uint3 id : SV_DispatchThreadID)
+{
+    int2 x = int2(id.xy);
+
+    // read height and horizontal displacement
+    float dy = displacement[x].g;
+    float dx = displacement[x].r;
+    float dz = displacement[x].b;
+
+   // float noise = frac(sin(dot(float2(x.x + 17.0, x.y + 43.0), float2(12.9898, 78.233))) * 43758.5453123);
+    float lowFreqNoise = perlinNoise[x].r;
+	float highFreqNoise = rand(x);
+
+    float noise = lerp(lowFreqNoise, highFreqNoise, 0.1);
+    
+    // calculate gradient
+    float gradX = abs(displacement[x + int2(1, 0)].g - dy );
+    float gradZ = abs(displacement[x + int2(0, 1)].g - dy );
+    float gradient = sqrt(gradX * gradX + gradZ * gradZ);
+    
+    // Add noise
+    gradient *= saturate(noise * 1.2); // Add randomness to foam regions
+    
+    // horizontal variation rate
+    float displacementVariation = abs(dx) + abs(dz);
+    
+    float currentFoam = foamTexture[x].r;
+    float foamIntensity = saturate((1.0 - currentFoam) * (gradient * threshold + displacementVariation * 0.5));
+
+    float globalNoise = saturate(perlinNoise[x].r * 0.9 + highFreqNoise * 0.1);
+    foamIntensity *= globalNoise;
+    
+    currentFoam = max(0.0, currentFoam - decayRate * deltaTime);
+
+    foamTexture[x] = float4(saturate(currentFoam + foamIntensity), 0, 0, 1.0);
+}

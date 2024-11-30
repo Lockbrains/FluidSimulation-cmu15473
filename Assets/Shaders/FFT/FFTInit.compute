@@ -4,12 +4,6 @@
 #define M_PI 3.141592653589793238462643383279502884197
 #define g 9.81
 
-// Input Textures 
-Texture2D<float> NoiseR0;
-Texture2D<float> NoiseI0;
-Texture2D<float> NoiseR1;
-Texture2D<float> NoiseI1;
-
 // Output Textures
 RWTexture2D<float4> H0k;// the tilde_h0k shader
 RWTexture2D<float4> H0MinusK; // the tilde_h0minusk
@@ -49,24 +43,6 @@ float4 GaussianRND(uint2 id) {
     return float4(z0, z1, z2, z3); 
 }
 
-
-// Box-Muller method
-float4 GaussRND(uint2 id) {
-    float2 texCoord = float2(id) / N;
-    
-    float u1 = clamp(NoiseR0.Load(int3(id.xy, 0)).r, 0.001, 1.0);
-    float u2 = clamp(NoiseI0.Load(int3(id.xy, 0)).r, 0.001, 1.0);
-    float v1 = clamp(NoiseR1.Load(int3(id.xy, 0)).r, 0.001, 1.0);
-    float v2 = clamp(NoiseI1.Load(int3(id.xy, 0)).r, 0.001, 1.0);
-    
-    float z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
-    float z1 = sqrt(-2.0 * log(u1)) * sin(2.0 * M_PI * u2);
-
-    float z2 = sqrt(-2.0 * log(v1)) * cos(2.0 * M_PI * v2);
-    float z3 = sqrt(-2.0 * log(v1)) * sin(2.0 * M_PI * v2);
-
-    return float4(z0, z1, z2, z3); 
-}
 
 [numthreads(16,16,1)]
 void FFTInit (uint3 id : SV_DispatchThreadID)
