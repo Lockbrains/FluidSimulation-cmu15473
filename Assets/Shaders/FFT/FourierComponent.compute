@@ -1,0 +1,112 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel FourierComponent
+
+#define M_PI 3.141592653589793238462643383279502884197
+#define g 9.81
+
+// Input Texture
+Texture2D<float2> Tilde_h0k;     // Spectrum h0(k)
+Texture2D<float2> Tilde_h0MinusK;// Spectrum h0(-k)
+
+// Output
+RWTexture2D<float4> TildeHktDy;    // horizontal displacement
+RWTexture2D<float4> TildeHktDx;    // horizontal displacement
+RWTexture2D<float4> TildeHktDz;    // horizontal displacement
+
+cbuffer Parameters
+{
+    int N;      // resolution
+    float L;    // patch size
+    float Time; // current Time
+}
+
+struct Complex
+{
+    float real;
+    float imag;
+};
+
+Complex Mul (Complex c0, Complex c1)
+{
+    Complex result;
+    result.real = c0.real * c1.real - c0.imag * c1.imag;
+    result.imag = c0.real * c1.imag + c0.imag * c1.real;
+    return result; 
+}
+
+Complex Add (Complex c0, Complex c1)
+{
+    Complex result;
+    result.real = c0.real + c1.real;
+    result.imag = c0.imag + c1.imag;
+    return result;
+}
+
+Complex Conj(Complex c)
+{
+    Complex result;
+    result.real = c.real;
+    result.imag = -c.imag;
+    return result;
+}
+
+[numthreads(16,16,1)]
+void FourierComponent (uint3 id : SV_DispatchThreadID)
+{
+    float2 x = float2(id.xy) - float(N) / 2.0;
+
+    // Wave vector
+    // Equation (4.2)
+    float kx = (2.0 * M_PI * x.x) / L;
+    float kz = (2.0 * M_PI * x.y) / L;
+    float2 k = float2(kx, kz);
+
+    float kLength = length(k);
+    if(kLength < 0.00001) kLength = 0.00001;
+
+    // frequency omega(k)
+    // Equation (3.7)
+    float w = sqrt(g * kLength);
+
+    // Fourier Component
+    // Equation (3.8)
+    float2 tilde_h0k_values = Tilde_h0k[id.xy].rg;
+    Complex fourierAmp;
+    fourierAmp.real = tilde_h0k_values.x;
+    fourierAmp.imag = tilde_h0k_values.y;
+
+    float2 tilde_h0MinusK_values = Tilde_h0MinusK[id.xy].rg;
+    Complex fourierAmpConj_Raw;
+    fourierAmpConj_Raw.real = tilde_h0MinusK_values.x;
+    fourierAmpConj_Raw.imag = tilde_h0MinusK_values.y;
+    Complex fourierAmpConj = Conj(fourierAmpConj_Raw);
+    
+
+    float cos_wt = cos(w * Time);
+    float sin_wt = sin(w * Time);
+
+    Complex expIwt, expIwtInv;
+    expIwt.real = cos_wt;
+    expIwt.imag = sin_wt;
+    expIwtInv.real = cos_wt;
+    expIwtInv.imag = -sin_wt;
+
+    // Wave Height
+    Complex hktDy = Add(Mul(fourierAmp, expIwt), Mul(fourierAmpConj, expIwtInv));
+
+    // Horizontal Displacement
+    Complex dx, dz;
+    dx.real = 0.0;
+    dx.imag = -k.x / kLength;
+
+    dz.real = 0.0;
+    dz.imag = -k.y / kLength;
+
+    Complex hktDx = Mul(dx, hktDy);
+    Complex hktDz = Mul(dz, hktDy);
+
+    // Write into texture
+    TildeHktDy[id.xy] = float4(hktDy.real, hktDy.imag, 0.0, 1.0);
+    TildeHktDx[id.xy] = float4(hktDx.real, hktDx.imag, 0.0, 1.0);
+    TildeHktDz[id.xy] = float4(hktDz.real, hktDz.imag, 0.0, 1.0);
+}

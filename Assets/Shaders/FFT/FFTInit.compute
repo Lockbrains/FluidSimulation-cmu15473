@@ -1,0 +1,106 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel FFTInit
+
+#define M_PI 3.141592653589793238462643383279502884197
+#define g 9.81
+
+// Input Textures 
+Texture2D<float> NoiseR0;
+Texture2D<float> NoiseI0;
+Texture2D<float> NoiseR1;
+Texture2D<float> NoiseI1;
+
+// Output Textures
+RWTexture2D<float4> H0k;// the tilde_h0k shader
+RWTexture2D<float4> H0MinusK; // the tilde_h0minusk
+
+
+cbuffer Parameters
+{
+    int N; // the resolution
+    float L; // the patch size
+    float A; // the wave adjustment parameter
+    float V; // wind speed
+    float2 windDirection; // wind direction
+}
+
+float rand(uint2 seed)
+{
+    uint n = seed.x * 15731 + seed.y * 789221 + 1376312589;
+    n = (n >> 13) ^ n;
+    return frac((n * (n * n * 15731 + 789221) + 1376312589) * 1.0 / 4294967296.0);
+}
+
+// generate random gaussian variable
+float4 GaussianRND(uint2 id) {
+    float2 texCoord = float2(id) / N;
+    
+    float u1 = rand(id * 1.235);
+    float u2 = rand(id * 3.2513);
+    float v1 = rand(id * 11.4592);
+    float v2 = rand(id * 5.304);
+    
+    float z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+    float z1 = sqrt(-2.0 * log(u1)) * sin(2.0 * M_PI * u2);
+
+    float z2 = sqrt(-2.0 * log(v1)) * cos(2.0 * M_PI * v2);
+    float z3 = sqrt(-2.0 * log(v1)) * sin(2.0 * M_PI * v2);
+
+    return float4(z0, z1, z2, z3); 
+}
+
+
+// Box-Muller method
+float4 GaussRND(uint2 id) {
+    float2 texCoord = float2(id) / N;
+    
+    float u1 = clamp(NoiseR0.Load(int3(id.xy, 0)).r, 0.001, 1.0);
+    float u2 = clamp(NoiseI0.Load(int3(id.xy, 0)).r, 0.001, 1.0);
+    float v1 = clamp(NoiseR1.Load(int3(id.xy, 0)).r, 0.001, 1.0);
+    float v2 = clamp(NoiseI1.Load(int3(id.xy, 0)).r, 0.001, 1.0);
+    
+    float z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+    float z1 = sqrt(-2.0 * log(u1)) * sin(2.0 * M_PI * u2);
+
+    float z2 = sqrt(-2.0 * log(v1)) * cos(2.0 * M_PI * v2);
+    float z3 = sqrt(-2.0 * log(v1)) * sin(2.0 * M_PI * v2);
+
+    return float4(z0, z1, z2, z3); 
+}
+
+[numthreads(16,16,1)]
+void FFTInit (uint3 id : SV_DispatchThreadID)
+{
+    float2 x = float2(id.xy) - float(N) / 2.0;
+
+    // wave vector
+    float kx = (2.0 * M_PI * x.x) / L;
+    float kz = (2.0 * M_PI * x.y) / L;
+    float2 k = float2(kx, kz);
+    
+    float windLength = (V * V) / g;
+    
+    float kLength = length(k);
+    if (kLength < 0.00001) kLength = 0.00001;
+    float magSq = kLength * kLength;
+    
+    float kDotW = dot(normalize(k), normalize(windDirection));
+
+    float4 gauss_random = GaussianRND(id.xy);
+
+    float phillips = A / (magSq * magSq) * exp(-1.0 / (magSq * windLength * windLength));
+    if (kLength < 0.001) phillips = 0.0; 
+    float phillipsH0K = pow(kDotW, 6.0) * phillips;
+    float phillipsH0MinusK = pow(dot(normalize(-k), normalize(windDirection)),6.0) * phillips;
+
+    float swguard = exp(-magSq * pow(L / 2000.0, 2.0));
+    
+    // sqrt (Ph(k))/ sqrt (2)
+    // Spectrum h0(k)
+    float h0k = clamp(sqrt(phillipsH0K / 2.0) * swguard, -4000, 4000.0); ;
+    float h0MinusK = clamp(sqrt(phillipsH0MinusK / 2.0 * swguard), -4000, 4000.0);
+    
+    // Save to the texture
+    H0k[id.xy] = float4(gauss_random.xy * h0k, 0.0, 0.0);
+    H0MinusK[id.xy] = float4(gauss_random.zw * h0MinusK, 0.0, 0.0);
+}

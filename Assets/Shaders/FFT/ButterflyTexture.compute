@@ -1,0 +1,65 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel ButterflyTexture
+
+#define M_PI 3.141592653589793238462643383279502884197
+
+// Input
+StructuredBuffer<int> bit_reversed;
+
+// Output
+RWTexture2D<float4> butterflyTexture;
+
+// Constants
+cbuffer Parameters
+{
+    int N; // Resolution
+}
+
+struct Complex
+{
+    float real;
+    float imag;
+};
+
+[numthreads(16,16,1)]
+void ButterflyTexture (uint3 id : SV_DispatchThreadID)
+{
+    int2 x = int2(id.xy);
+
+    // twiddle factor
+    float k = fmod(x.y * (float(N) / pow(2.0, x.x + 1)), N);
+    Complex twiddle;
+    twiddle.real = cos (2.0 * M_PI * k / float(N));
+    twiddle.imag = sin (2.0 * M_PI * k / float(N));
+
+    int butterflySpan = int(pow(2.0, x.x));
+    int butterflyWing; // wing mark
+
+    if(fmod(x.y, pow(2.0, x.x + 1)) < pow(2.0, x.x))
+    {
+        butterflyWing = 1;
+    } else
+    {
+        butterflyWing = 0;
+    }
+
+    if(x.x == 0)
+    {
+        if(butterflyWing == 1)
+        {
+            butterflyTexture[x] = float4(twiddle.real, twiddle.imag, bit_reversed[x.y], bit_reversed[x.y + 1]);
+        } else
+        {
+            butterflyTexture[x] = float4(twiddle.real, twiddle.imag, bit_reversed[x.y - 1], bit_reversed[x.y]);
+        }
+    } else
+    {
+        if(butterflyWing == 1)
+        {
+            butterflyTexture[x] = float4(twiddle.real, twiddle.imag, x.y, x.y + butterflySpan);
+        } else
+        {
+            butterflyTexture[x] = float4(twiddle.real, twiddle.imag, x.y - butterflySpan, x.y);
+        }
+    }
+}

@@ -1,0 +1,218 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Butterfly
+
+#define M_PI 3.141592653589793238462643383279502884197
+
+// Input Texture
+Texture2D<float4> butterflyTexture;
+
+// Output
+RWTexture2D<float4> pingpong0_Dy;
+RWTexture2D<float4> pingpong1_Dy;
+RWTexture2D<float4> pingpong0_Dx;
+RWTexture2D<float4> pingpong1_Dx;
+RWTexture2D<float4> pingpong0_Dz;
+RWTexture2D<float4> pingpong1_Dz;
+
+cbuffer Parameters
+{
+    int stage;      // current Butterfly stage
+    int pingpong;   // current pingpong status 0 / 1
+    int direction;  // horizontal: 0; vertical: 1
+}
+
+struct Complex
+{
+    float real;
+    float imag;
+};
+
+Complex Mul (Complex c0, Complex c1)
+{
+    Complex result;
+    result.real = c0.real * c1.real - c0.imag * c1.imag;
+    result.imag = c0.real * c1.imag + c0.imag * c1.real;
+    return result; 
+}
+
+Complex Add (Complex c0, Complex c1)
+{
+    Complex result;
+    result.real = c0.real + c1.real;
+    result.imag = c0.imag + c1.imag;
+    return result;
+}
+
+// Horizontal FFT using butterfly
+void HorizontalFFT(uint3 id)
+{
+    int2 x = int2(id.xy);
+    
+    // load complex from pingpong
+    Complex p, q, w, H;
+    Complex px, qx, wx, Hx;
+    Complex pz, qz, wz, Hz;
+    if(pingpong == 0)
+    {
+        int2 index = int2(stage, x.x);
+        float4 data = butterflyTexture[index];
+        float2 p_ = pingpong0_Dy[int2(data.z, x.y)].rg;
+        float2 q_ = pingpong0_Dy[int2(data.w, x.y)].rg;
+        float2 w_ = float2(data.x, data.y);
+
+        float2 px_ = pingpong0_Dx[int2(data.z, x.y)].rg;
+        float2 qx_ = pingpong0_Dx[int2(data.w, x.y)].rg;
+        float2 wx_ = float2(data.x, data.y);
+
+        float2 pz_ = pingpong0_Dz[int2(data.z, x.y)].rg;
+        float2 qz_ = pingpong0_Dz[int2(data.w, x.y)].rg;
+        float2 wz_ = float2(data.x, data.y);
+        
+        p.real = p_.x; p.imag = p_.y;
+        q.real = q_.x; q.imag = q_.y;
+        w.real = w_.x; w.imag = w_.y;
+
+        px.real = px_.x; px.imag = px_.y;
+        qx.real = qx_.x; qx.imag = qx_.y;
+        wx.real = wx_.x; wx.imag = wx_.y;
+
+        pz.real = pz_.x; pz.imag = pz_.y;
+        qz.real = qz_.x; qz.imag = qz_.y;
+        wz.real = wz_.x; wz.imag = wz_.y;
+
+        H = Add(p, Mul(w, q));
+        Hx = Add(px, Mul(wx, qx));
+        Hz = Add(pz, Mul(wz, qz));
+
+        pingpong1_Dy[x] = float4(H.real, H.imag, 0, 1);
+        pingpong1_Dx[x] = float4(Hx.real, Hx.imag, 0, 1);
+        pingpong1_Dz[x] = float4(Hz.real, Hz.imag, 0, 1);
+    } else if (pingpong == 1)
+    {
+        int2 index = int2(stage, x.x);
+        float4 data = butterflyTexture[index];
+        float2 p_ = pingpong1_Dy[int2(data.z, x.y)].rg;
+        float2 q_ = pingpong1_Dy[int2(data.w, x.y)].rg;
+        float2 w_ = float2(data.x, data.y);
+
+        float2 px_ = pingpong1_Dx[int2(data.z, x.y)].rg;
+        float2 qx_ = pingpong1_Dx[int2(data.w, x.y)].rg;
+        float2 wx_ = float2(data.x, data.y);
+
+        float2 pz_ = pingpong1_Dz[int2(data.z, x.y)].rg;
+        float2 qz_ = pingpong1_Dz[int2(data.w, x.y)].rg;
+        float2 wz_ = float2(data.x, data.y);
+
+        p.real = p_.x; p.imag = p_.y;
+        q.real = q_.x; q.imag = q_.y;
+        w.real = w_.x; w.imag = w_.y;
+
+        px.real = px_.x; px.imag = px_.y;
+        qx.real = qx_.x; qx.imag = qx_.y;
+        wx.real = wx_.x; wx.imag = wx_.y;
+
+        pz.real = pz_.x; pz.imag = pz_.y;
+        qz.real = qz_.x; qz.imag = qz_.y;
+        wz.real = wz_.x; wz.imag = wz_.y;
+
+        H = Add(p, Mul(w, q));
+        Hx = Add(px, Mul(wx, qx));
+        Hz = Add(pz, Mul(wz, qz));
+
+        pingpong0_Dy[x] = float4(H.real, H.imag, 0, 1);
+        pingpong0_Dx[x] = float4(Hx.real, Hx.imag, 0, 1);
+        pingpong0_Dz[x] = float4(Hz.real, Hz.imag, 0, 1);
+    }
+}
+
+void VerticalFFT(uint3 id)
+{
+    int2 x = int2(id.xy);
+    
+    // load complex from pingpong
+    Complex p, q, w, H;
+    Complex px, qx, wx, Hx;
+    Complex pz, qz, wz, Hz;
+
+    if(pingpong == 0)
+    {
+        int2 index = int2(stage, x.y);
+        float4 data = butterflyTexture[index];
+        float2 p_ = pingpong0_Dy[int2(x.x, data.z)].rg;
+        float2 q_ = pingpong0_Dy[int2(x.x, data.w)].rg;
+        float2 w_ = float2(data.x, data.y);
+
+        float2 px_ = pingpong0_Dx[int2(x.x, data.z)].rg;
+        float2 qx_ = pingpong0_Dx[int2(x.x, data.w)].rg;
+        float2 wx_ = float2(data.x, data.y);
+
+        float2 pz_ = pingpong0_Dz[int2(x.x, data.z)].rg;
+        float2 qz_ = pingpong0_Dz[int2(x.x, data.w)].rg;
+        float2 wz_ = float2(data.x, data.y);
+        
+        p.real = p_.x; p.imag = p_.y;
+        q.real = q_.x; q.imag = q_.y;
+        w.real = w_.x; w.imag = w_.y;
+
+        px.real = px_.x; px.imag = px_.y;
+        qx.real = qx_.x; qx.imag = qx_.y;
+        wx.real = wx_.x; wx.imag = wx_.y;
+
+        pz.real = pz_.x; pz.imag = pz_.y;
+        qz.real = qz_.x; qz.imag = qz_.y;
+        wz.real = wz_.x; wz.imag = wz_.y;
+
+
+        H = Add(p, Mul(w, q));
+        Hx = Add(px, Mul(wx, qx));
+        Hz = Add(pz, Mul(wz, qz));
+        
+        pingpong1_Dy[x] = float4(H.real, H.imag, 0, 1);
+        pingpong1_Dx[x] = float4(Hx.real, Hx.imag, 0, 1);
+        pingpong1_Dz[x] = float4(Hz.real, Hz.imag, 0, 1);
+    } else if (pingpong == 1)
+    {
+        int2 index = int2(stage, x.y);
+        float4 data = butterflyTexture[index];
+        float2 p_ = pingpong1_Dy[int2(x.x, data.z)].rg;
+        float2 q_ = pingpong1_Dy[int2(x.x, data.w)].rg;
+        float2 w_ = float2(data.x, data.y);
+
+        float2 px_ = pingpong1_Dx[int2(x.x, data.z)].rg;
+        float2 qx_ = pingpong1_Dx[int2(x.x, data.w)].rg;
+        float2 wx_ = float2(data.x, data.y);
+
+        float2 pz_ = pingpong1_Dz[int2(x.x, data.z)].rg;
+        float2 qz_ = pingpong1_Dz[int2(x.x, data.w)].rg;
+        float2 wz_ = float2(data.x, data.y);
+        
+        p.real = p_.x; p.imag = p_.y;
+        q.real = q_.x; q.imag = q_.y;
+        w.real = w_.x; w.imag = w_.y;
+
+        px.real = px_.x; px.imag = px_.y;
+        qx.real = qx_.x; qx.imag = qx_.y;
+        wx.real = wx_.x; wx.imag = wx_.y;
+
+        pz.real = pz_.x; pz.imag = pz_.y;
+        qz.real = qz_.x; qz.imag = qz_.y;
+        wz.real = wz_.x; wz.imag = wz_.y;
+
+        H = Add(p, Mul(w, q));
+        Hx = Add(px, Mul(wx, qx));
+        Hz = Add(pz, Mul(wz, qz));
+        
+        pingpong0_Dy[x] = float4(H.real, H.imag, 0, 1);
+        pingpong0_Dx[x] = float4(Hx.real, Hx.imag, 0, 1);
+        pingpong0_Dz[x] = float4(Hz.real, Hz.imag, 0, 1);
+    }
+}
+
+[numthreads(16,16,1)]
+void Butterfly (uint3 id : SV_DispatchThreadID)
+{
+    if (direction == 0)
+        HorizontalFFT(id);
+    else if (direction == 1)
+        VerticalFFT(id);
+}

@@ -1,0 +1,80 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel IP
+
+// Input Textures
+Texture2D<float4> pingpong0_Dy;
+Texture2D<float4> pingpong1_Dy;
+Texture2D<float4> pingpong0_Dx;
+Texture2D<float4> pingpong1_Dx;
+Texture2D<float4> pingpong0_Dz;
+Texture2D<float4> pingpong1_Dz;
+
+// Output Texture
+RWTexture2D<float4> displacement;
+
+cbuffer Parameters
+{
+    int pingpong;
+    int N;
+}
+
+
+struct Complex
+{
+    float real;
+    float imag;
+};
+
+float2 Conj(float2 c)
+{
+    return float2(c.x, -c.y);
+}
+
+Complex Mul (Complex c0, Complex c1)
+{
+    Complex result;
+    result.real = c0.real * c1.real - c0.imag * c1.imag;
+    result.imag = c0.real * c1.imag + c0.imag * c1.real;
+    return result; 
+}
+
+Complex Add (Complex c0, Complex c1)
+{
+    Complex result;
+    result.real = c0.real + c1.real;
+    result.imag = c0.imag + c1.imag;
+    return result;
+}
+
+
+[numthreads(16,16,1)]
+void IP (uint3 id : SV_DispatchThreadID)
+{
+    int2 x = int2(id.xy);
+
+    float perms[] = {1.0, -1.0};
+    int index = int(fmod((int(x.x + x.y)), 2));
+    float perm = perms[index];
+
+    if(pingpong == 0)
+    {
+        float h = pingpong0_Dy[x].r;
+        float dx = pingpong0_Dx[x].r;
+        float dz = pingpong0_Dz[x].r;
+        
+        displacement[x] = float4(perm * (dx / float(N * N)),
+                                 perm * (h / float (N * N)),
+                                 perm * (dz / float(N * N)),
+                                 1);
+    } else if (pingpong == 1)
+    {
+        float h = pingpong1_Dy[x].r;
+        float dx = pingpong1_Dx[x].r;
+        float dz = pingpong1_Dz[x].r;
+        
+        displacement[x] = float4(perm * (dx / float(N * N)),
+                                 perm * (h / float (N * N)),
+                                 perm * (dz / float(N * N)),
+                                 1);
+    }
+}
