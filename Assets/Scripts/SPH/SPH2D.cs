@@ -1,12 +1,9 @@
-using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using UnityEngine;
+using System.Collections.Generic;
+using UnityEngine.Rendering;
 
 [System.Serializable]
-public struct Particle
-{
-    public Vector2 position;
-    public float radius;
-}
 public class SPH2D : MonoBehaviour
 {
     
@@ -20,13 +17,11 @@ public class SPH2D : MonoBehaviour
     public Shader particleShader;
     private Material particleMaterial;
 
-    public List<Particle> particles;
     private ComputeBuffer particleBuffer;
     private static readonly int ParticlesBufferProperty = Shader.PropertyToID("_ParticlesBuffer");
 
     void Start()
     {
-        particles = new List<Particle>();
         Vector2 spawnTopLeft = spawnBoxCenter - spawnBox / 2;
 
         // Generate particles
@@ -35,28 +30,19 @@ public class SPH2D : MonoBehaviour
             for (int y = 0; y < numToSpawn.y; y++)
             {
                 Vector2 spawnPosition = spawnTopLeft + new Vector2(x * particleRadius * 2, y * particleRadius * 2);
-                Particle p = new Particle
-                {
-                    position = spawnPosition,
-                    radius = particleRadius
-                };
-                particles.Add(p);
+               
             }
         }
 
         // Create the compute buffer for particles
-        particleBuffer = new ComputeBuffer(particles.Count, sizeof(float) * 3);  // 3 floats (x, y, radius)
-        particleBuffer.SetData(particles.ToArray());
 
         // Set up the material using the shader
         particleMaterial = new Material(particleShader);
-        particleMaterial.SetBuffer(ParticlesBufferProperty, particleBuffer);
     }
 
     void Update()
     {
         // Render all particles using the custom shader
-         Graphics.DrawProcedural(particleMaterial, new Bounds(Vector3.zero, new Vector3(100, 100, 0)), MeshTopology.Points, particles.Count);
     }
 
     void OnDestroy()
@@ -73,12 +59,9 @@ public class SPH2D : MonoBehaviour
         Gizmos.color = Color.blue;
         Gizmos.DrawWireCube(spawnBoxCenter, spawnBox);
 
-        if (particles == null) return;
 
         Gizmos.color = particleColor;
-        foreach (var particle in particles) {
-            DrawCircle(particle.position, particle.radius, particleColor);
-        }
+        
         
     }
   

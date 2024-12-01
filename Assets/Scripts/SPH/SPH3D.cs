@@ -18,16 +18,27 @@ public class SPH3D : MonoBehaviour
     }
 
     [Header("SPH Constants")]
-    public float deltaT = 0.01f;
-    public float influenceRadius = 0.1f;
+    public float mass = 1.0f;
+    public float deltaT = 0.005f;
+    public float bounce = 0.1f;
     private float pi = Mathf.PI;
-    private float G = 9.81f;    
+    private float G = 9.81f;
+    public float k = 20f;
+    public float restDensity = 3f;   
+    public float viscosity = 0.1f;
+     
+
+    public static float influenceRadius = 4f;
+    private static float influenceRadius2 = influenceRadius * influenceRadius;
+    private static float influenceRadius3 = influenceRadius * influenceRadius2;
+    private static float influenceRadius6 = influenceRadius3 * influenceRadius3;
+    private static float influenceRadius9 = influenceRadius6 * influenceRadius3;
 
     [Header("Spawn Data")]
-    public static Vector3Int numToSpawn = new Vector3Int(2,2,2);
+    public static Vector3Int numToSpawn = new Vector3Int(16,16,16);
     public Vector3 boundingBox = new Vector3(30,30,30);
     public Vector3 spawnBoxCenter = new Vector3(0,3,0);
-    public Vector3 spawnBox = new Vector3(10,10,10);
+    public Vector3 spawnBox = new Vector3(24,24,24);
     public float particleRadius = 1f;
 
     [Header("Rendering Data")]
@@ -46,7 +57,7 @@ public class SPH3D : MonoBehaviour
     public float[] densities;
 
     private int particlesCount = numToSpawn.x * numToSpawn.y * numToSpawn.z;
-    private int threadsPerGroup = 8;
+    private int threadsPerGroup = 128;
 
 
     private ComputeBuffer particlesBuffer;
@@ -100,10 +111,24 @@ public class SPH3D : MonoBehaviour
         densitiesBuffer = new ComputeBuffer(particlesCount, sizeof(float));
         densitiesBuffer.SetData(densities);
 
+        computeShader.SetFloat("Mass", mass);
         computeShader.SetFloat("DeltaTime", deltaT);
-        computeShader.SetFloat("InfluenceRadius", influenceRadius);
+        computeShader.SetFloat("Bounce", bounce);
         computeShader.SetFloat("Pi", pi);
         computeShader.SetFloat("G", G);
+        computeShader.SetFloat("K", k);
+        computeShader.SetFloat("RestDensity", restDensity);
+        computeShader.SetFloat("Viscosity", viscosity);
+
+
+        Vector4 boundingBox = new Vector4(this.boundingBox.x, this.boundingBox.y, this.boundingBox.z, 0);
+        computeShader.SetVector("BoundingBox", boundingBox);
+
+        computeShader.SetFloat("InflRad", influenceRadius);
+        computeShader.SetFloat("InflRad2", influenceRadius2);
+        computeShader.SetFloat("InflRad3", influenceRadius3);
+        computeShader.SetFloat("InflRad6", influenceRadius6);
+        computeShader.SetFloat("InflRad9", influenceRadius9);
 
         integrateID = computeShader.FindKernel("Integrate");
         computeForcesID = computeShader.FindKernel("ComputeForces");
@@ -140,10 +165,16 @@ public class SPH3D : MonoBehaviour
     
     private void FixedUpdate()
     {   
-        
+        computeShader.Dispatch(computeDensityID, particlesCount/threadsPerGroup, 1, 1);
         computeShader.Dispatch(computeForcesID, particlesCount/threadsPerGroup, 1, 1);
         computeShader.Dispatch(integrateID, particlesCount/threadsPerGroup, 1, 1);
+
         particlesBuffer.GetData(particles);
+        velocitiesBuffer.GetData(velocities);
+        forcesBuffer.GetData(forces);
+        pressuresBuffer.GetData(pressures);
+        densitiesBuffer.GetData(densities);
+    
 
         /**
         computeForces();
@@ -171,6 +202,7 @@ public class SPH3D : MonoBehaviour
                 for (int z = 0; z < numToSpawn.z; z++)
                 {
                     Vector3 spawnPosition = spawnTopLeft + new Vector3(x * particleRadius * 2, y * particleRadius * 2, z * particleRadius * 2);
+                    spawnPosition += new Vector3(Random.Range(-particleRadius, particleRadius), Random.Range(-particleRadius, particleRadius), Random.Range(-particleRadius, particleRadius));
                     int i = x + y * numToSpawn.x + z * numToSpawn.x * numToSpawn.y;
                     particles[i] = spawnPosition;
                     velocities[i] = Vector3.zero;
@@ -188,8 +220,11 @@ public class SPH3D : MonoBehaviour
         Gizmos.color = Color.blue;
         Gizmos.DrawWireCube(Vector3.zero, boundingBox);
         
-        Gizmos.color = Color.cyan;
-        Gizmos.DrawWireCube(spawnBoxCenter, spawnBox);
+        if(!Application.isPlaying){
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireCube(spawnBoxCenter, spawnBox);
+        }
+        
         
 
     }
