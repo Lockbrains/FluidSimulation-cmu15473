@@ -186,16 +186,24 @@ public class ShapeFFT : MonoBehaviour
 
             CopyTextureData(hktTexture, pingpong1);
 
-            // updateRenderer.material.SetTexture("_MainTex", hktTexture); 
+            hktDyRenderer.material.SetTexture("_MainTex", hktTexture); 
 
-            // Complex[,] hktData = ExtractDataFromTexture(hktTexture);
-
-            // PerformHorizontalFFT();
             
-            // PerformVerticalFFT();
+            CopyTextureData(hktTexture, pingpong0);
+            
+            currentPingpong = PerformHorizontalFFT();
+            
+            currentPingpong = PerformVerticalFFT(currentPingpong);
 
+            Complex[,] result = ExtractDataFromTexture(currentPingpong == 0 ? pingpong0 : pingpong1);
+            Complex[,] invertedResult = InverseAndPermuteCPU(result, N);
+            
+            Texture2D displacementTexture = GenerateTexture(invertedResult);
+            FFTResultRenderer.material.SetTexture("_MainTex", displacementTexture);
+            
             // Visualize 1D FFT Result
-            // Texture2D fftResultTexture = GenerateTexture(hktData);
+            pingpongRenderer0.material.SetTexture("_MainTex", pingpong0);
+            pingpongRenderer1.material.SetTexture("_MainTex", pingpong1);
         }
     }
     
@@ -669,50 +677,56 @@ public class ShapeFFT : MonoBehaviour
     
     private void HorizontalButterflies(int stage, int pingpong)
     {
+        Color[] butterflyData = butterflyTexture.GetPixels(); 
+        Complex[,] input = pingpong == 0 ? ExtractDataFromTexture(pingpong1) : ExtractDataFromTexture(pingpong0);
+        Complex[,] output = new Complex[N, N];
+        
+        Color[] resultPixels = new Color[N * N];
         // Phase 3 Horitonzal 1D FFT
         for (int y = 0; y < N; y++)
         {
             for (int x = 0; x < N; x++)
             {
-                Color data = butterflyTexture.GetPixel(stage, x);
+                Color data = butterflyData[stage * N + x];
                 
                 int px = Mathf.FloorToInt(data.b);
                 int qx = Mathf.FloorToInt(data.a);
                 
                 Complex p, q;
-                if (pingpong == 0)
-                {
-                    p = LoadComplexFromTexture(pingpong0, px, y);
-                    q = LoadComplexFromTexture(pingpong0, qx, y);
-                    Complex w = new Complex(data.r, data.g);
-                    
-                    Complex H = p + w * q;
-                    StoreComplexToTexture(pingpong1, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
-                }
-                else
-                {
-                    p = LoadComplexFromTexture(pingpong1, px, y);
-                    q = LoadComplexFromTexture(pingpong1, qx, y);
-                    Complex w = new Complex(data.r, data.g);
-                    
-                    Complex H = p + w * q;
-                    StoreComplexToTexture(pingpong0, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
-                    
-                }
+                p = input[px, y];
+                q = input[qx, y];
+                Complex w = new Complex(data.r, data.g);
+
+                Complex H = p + w * q;
+                output[x, y] = H;
+                resultPixels[y * N + x] = new Color((float)H.Real, (float)H.Imaginary, 0, 1);
             }
+        }
+        
+        if (pingpong == 0)
+        {
+            pingpong1.SetPixels(resultPixels);
+            pingpong1.Apply(); 
+        }
+        else
+        {
+            pingpong0.SetPixels(resultPixels);
+            pingpong0.Apply(); 
         }
     }
     
-    void PerformHorizontalFFT()
+    int PerformHorizontalFFT()
     {
         int stages = Mathf.RoundToInt(Mathf.Log(N, 2));
-        int pingpong = 1;
+        int pingpong = 0;
 
         for (int stage = 0; stage < stages; stage++)
         {
             HorizontalButterflies(stage, pingpong);
             pingpong = 1 - pingpong;
         }
+
+        return pingpong;
     }
     
     
@@ -720,57 +734,85 @@ public class ShapeFFT : MonoBehaviour
     #endregion
     
     #region Phase 4 Vertical 1D FFT
-    void PerformVerticalFFT()
+    int PerformVerticalFFT(int initPingpong)
     {
         int stages = Mathf.RoundToInt(Mathf.Log(N, 2));
-        int pingpong = 0;
+        int pingpong = initPingpong;
 
         for (int stage = 0; stage < stages; stage++)
         {
             VerticalButterflies(stage, pingpong);
             pingpong = 1 - pingpong; 
         }
+
+        return pingpong;
     }
     
     private void VerticalButterflies(int stage, int pingpong)
     {
+        Color[] butterflyData = butterflyTexture.GetPixels();
+        Complex[,] input = pingpong == 0 ? ExtractDataFromTexture(pingpong1) : ExtractDataFromTexture(pingpong0);
+        Complex[,] output = new Complex[N, N];
+
+        Color[] resultPixels = new Color[N * N]; 
+        
         for (int x = 0; x < N; x++)
         {
-            for (int y = 0; y < N; y++) 
+            for (int y = 0; y < N; y++)
             {
-                Color data = butterflyTexture.GetPixel(stage, y);
- 
-                int py = Mathf.FloorToInt(data.b); 
+                Color data = butterflyData[stage * N + y];
+                int py = Mathf.FloorToInt(data.b);
                 int qy = Mathf.FloorToInt(data.a);
                 
-                Complex p, q;
-                if (pingpong == 0)
-                {
-                    p = LoadComplexFromTexture(pingpong0, x, py);
-                    q = LoadComplexFromTexture(pingpong0, x, qy);
-                    
-                    Complex w = new Complex(data.r, data.g);
-                    
-                    Complex H = p + w * q;
-                    StoreComplexToTexture(pingpong1, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
-                }
-                else
-                {
-                    p = LoadComplexFromTexture(pingpong1, x, py);
-                    q = LoadComplexFromTexture(pingpong1, x, qy);
-                    
-                    Complex w = new Complex(data.r, data.g);
-                    
-                    Complex H = p + w * q;
-                    StoreComplexToTexture(pingpong1, x, y, new Color((float)H.Real, (float)H.Imaginary, 0, 1));
-                }
+                Complex p = input[x, py];
+                Complex q = input[x, qy];
+                Complex w = new Complex(data.r, data.g);
+
+                Complex H = p + w * q;
+                
+                output[x, y] = H;
+                resultPixels[y * N + x] = new Color((float)H.Real, (float)H.Imaginary, 0, 1);
             }
+        }
+        
+        if (pingpong == 0)
+        {
+            pingpong1.SetPixels(resultPixels);
+            pingpong1.Apply(); 
+        }
+        else
+        {
+            pingpong0.SetPixels(resultPixels);
+            pingpong0.Apply(); 
         }
     }
     
     #endregion
     
-    #region Phase 5 Inversion and Permutation
-    
+    #region Phase 5 Inversion
+    private Complex[,] InverseAndPermuteCPU(Complex[,] input, int N)
+    {
+        Complex[,] output = new Complex[N, N];
+
+        // 1. Define perms array for alternation
+        float[] perms = { 1.0f, -1.0f };
+
+        // 2. Apply scaling factor and permutation
+        for (int y = 0; y < N; y++)
+        {
+            for (int x = 0; x < N; x++)
+            {
+                // Determine perm based on (x + y) % 2
+                int index = (x + y) % 2;
+                float perm = perms[index];
+
+                // Apply scaling factor (1 / N^2) and permutation
+                Complex h = input[x, y] * (1.0f / (N * N));
+                output[x, y] = new Complex(h.Real * perm, h.Imaginary * perm);
+            }
+        }
+
+        return output;
+    }
     #endregion
 } 
