@@ -15,9 +15,10 @@ struct Particle
 {
     float pressure;
     float density;
-    float3 currentForce;
-    float3 velocity;
-    float3 position;
+    float2 currentForce;
+    float2 velocity;
+    float2 position;
+    int cellIndex;
 };
 
 StructuredBuffer<Particle> particles;
@@ -73,8 +74,8 @@ float4 Combine(float dstA, float dstB, float3 colourA, float3 colourB) {
 }
 
 float GetShapeDistance(Particle particle, float3 eye) {
-   
-    return SphereDistance(eye, particle.position, particleRadius);
+    float3 particlePos = float3(particle.position.x, 0, particle.position.y);
+    return SphereDistance(eye, particlePos, particleRadius);
     return maxDst;
 }
 

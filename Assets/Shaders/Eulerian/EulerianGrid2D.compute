@@ -1,0 +1,170 @@
+#pragma kernel AdvectDensity
+#pragma kernel Advect
+#pragma kernel ClearDivergence1
+#pragma kernel ClearDivergence2
+
+
+RWStructuredBuffer<float> vertVel;
+RWStructuredBuffer<float> horizVel;
+RWStructuredBuffer<float> density;
+
+RWStructuredBuffer<int> vertBoundary;
+RWStructuredBuffer<int> horizBoundary;
+
+// Output buffers
+RWStructuredBuffer<float> OutDensity;
+RWStructuredBuffer<float> OutVertVel;
+RWStructuredBuffer<float> OutHorizVel;
+
+
+
+// Parameters
+int Width;
+int Height;
+float DeltaT;
+float MaxDensity;
+float CellSize;
+float OverRelaxation;
+
+
+
+
+float avgVert(int x, int y){
+    int yul = (x-1) >= 0 ? (x-1) + (y+1)*Width : -1;
+    int yur = x < Width ? x + (y+1)*Width : -1;
+    int ydl = (x-1) >= 0 ? (x-1) + y*Width : -1;
+    int ydr = x < Width ? x + y*Width : -1;
+
+    float vel = 0;
+        int count = 0;
+        if(yul != -1){
+            vel += vertVel[yul];
+            count++;
+        }
+        if(yur != -1){
+            vel += vertVel[yur];
+            count++;
+        }
+        if(ydl != -1){
+            vel += vertVel[ydl];
+            count++;
+        }
+        if(ydr != -1){
+            vel += vertVel[ydr];
+            count++;
+        }
+        return vel/count;
+}
+
+float avgHor(int x, int y){
+    int xul = y < Height ? x + y*(Width+1) : -1;
+    int xur = y < Height ? x+1 + y*(Width+1) : -1;
+    int xdl = (y-1) >= 0 ? x + (y-1)*(Width+1) : -1;
+    int xdr = (y-1) >= 0 ? x+1 + (y-1)*(Width+1) : -1;
+
+    float vel = 0;
+    int count = 0;
+    if(xul != -1){
+        vel += horizVel[xul];
+        count++;
+    }
+    if(xur != -1){
+        vel += horizVel[xur];
+        count++;
+    }
+    if(xdl != -1){
+        vel += horizVel[xdl];
+        count++;
+    }
+    if(xdr != -1){
+        vel += horizVel[xdr];
+        count++;
+    }
+    return vel/count;
+}
+
+float bilinInter(float x, float y, RWStructuredBuffer<float> buffer, int width, int height){
+
+    int x0 = floor(x);
+    int x1 = min(x0 + 1, width - 1);
+    int y0 = floor(y);
+    int y1 = min(y0 + 1, height - 1);
+
+    float wx = x-x0;
+    float wy = y-y0;
+
+
+
+    return (1-wx)*(1-wy)*buffer[x0 + y0*width] 
+    + wx*(1-wy)*buffer[x1 + y0*width] 
+    + (1-wx)*wy*buffer[x0 + y1*width] 
+    + wx*wy*buffer[x1 + y1*width];
+}
+// Advection kernel
+[numthreads(10, 1, 1)]
+void AdvectDensity(uint3 id : SV_DispatchThreadID)
+{
+   return;
+
+    // Compute advection logic here, updating OutDensity based on Velocities and DeltaT
+}
+
+[numthreads(10, 1, 1)]
+void Advect(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x%Width;
+    uint idy = id.x / Width;
+    
+
+    if(vertBoundary[idx + idy*Width]){
+        OutVertVel[idx + idy*Width] = 0;
+    }
+    else{
+        float x = idx - DeltaT * horizVel[idx + idy*(Width+1)] / CellSize;
+        float y = idy - DeltaT * avgVert(idx, idy) / CellSize;
+        OutVertVel[idx + idy*Width] = bilinInter(x, y, vertVel, Width, Height);
+    }
+}
+
+
+
+// Divergence-clear kernel
+void clearDiv(uint idx, uint idy){
+    float div = vertVel[idx + (idy+1)*Width] - vertVel[idx + idy*Width] + 
+    horizVel[idx+1 + idy*(Width+1)] - horizVel[idx + idy*(Width+1)];
+
+    div *= OverRelaxation;
+
+    int vup = vertBoundary[idx + (idy+1)*Width] ? 0 : 1;
+    int vdown = vertBoundary[idx + idy*Width] ? 0 : 1;
+    int hleft = horizBoundary[idx + idy*(Width+1)] ? 0 : 1;
+    int hright = horizBoundary[idx+1 + idy*(Width+1)] ? 0 : 1;
+    int tot = vup + vdown + hleft + hright;
+    if(tot == 0) return;
+
+    vertVel[idx + (idy+1)*Width] -= div * vup / tot;
+    vertVel[idx + idy*Width] += div * vdown / tot;
+    horizVel[idx+1 + idy*(Width+1)] -= div * hright / tot;
+    horizVel[idx + idy*(Width+1)] += div * hleft / tot;
+
+}
+
+[numthreads(10, 1, 1)]
+void ClearDivergence1(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x%Width;
+    uint idy = id.x / Width;
+    if (idx%2 != idy%2) return;
+
+    clearDiv(idx, idy);
+}
+
+[numthreads(10, 1, 1)]
+void ClearDivergence2(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x%Width;
+    uint idy = id.x / Width;
+    if (idx%2 == idy%2) return;
+
+    clearDiv(idx, idy);
+}

@@ -1,5 +1,5 @@
 
-Shader "Custom/InstancedIndirectColor3D" {
+Shader "Custom/InstancedIndirectColor2D" {
     Properties {
         _ParticleRadius ("Particle Radius", Float) = 1.0 // Default value for particle radius
     }
@@ -22,21 +22,29 @@ Shader "Custom/InstancedIndirectColor3D" {
                 float4 vertex   : SV_POSITION;
                 fixed4 color    : COLOR;
             }; 
+            struct Particle
+			{
+                float pressure;
+                float density;
+                float2 currentForce;
+                float2 velocity;
+				float2 position;
+                int cellId;
+			};
 
-            StructuredBuffer<float3> Particles;
+            StructuredBuffer<Particle> Particles;
             float ParticleRadius;
 
             v2f vert(appdata_t i, uint instanceID: SV_InstanceID) {
                 v2f o;
 
+                // Scale the particle bc mesh is small
                 float4x4 mat = {
-                                    50*ParticleRadius, 0.f, 0.f, Particles[instanceID].x,
-                                    0.f, 50*ParticleRadius, 0.f, Particles[instanceID].y,
-                                    0.f, 0.f, 50*ParticleRadius, Particles[instanceID].z,
+                                    50*ParticleRadius, 0.f, 0.f, Particles[instanceID].position.x,
+                                    0.f, 50*ParticleRadius, 0.f, Particles[instanceID].position.y,
+                                    0.f, 0.f, 50*ParticleRadius, 0.f,
                                     0.f, 0.f, 0, 1.f
                                 };
-                // mat._11_22_33_44 = float4(1, 1, 1, 1);
-                // mat._14_24_34_44 = float4(_Particles[instanceID].xyz, 1);
 
                 float4 pos = mul(mat, i.vertex);
                 o.vertex = UnityObjectToClipPos(pos);

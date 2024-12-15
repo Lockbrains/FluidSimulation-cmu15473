@@ -1,0 +1,170 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Integrate
+#pragma kernel ComputeForces
+#pragma kernel ComputeDensityAndPressure
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+struct Particle
+{
+    float pressure;
+    float density;
+    float2 currentForce;
+    float2 velocity;
+    float2 position;
+    int cellIndex;
+};
+
+RWStructuredBuffer<Particle> particles;
+RWStructuredBuffer<int> cellStart;
+
+float Mass;
+float DeltaTime;
+float Bounce;
+float Pi;
+float G;
+float K;
+float RestDensity;
+float Viscosity;
+float2 BoundingBox;
+float InflRad;
+float InflRad2;
+float InflRad3;
+float InflRad6;
+float InflRad9;
+
+int NumCells;
+float MinPressure = 0.0f;
+float MaxPressure = 1000.0f;
+
+
+
+float densityKernel (float2 diff)
+{
+    float r = length(diff);
+    
+        return 315.0f / (64.0f * Pi * InflRad9) * pow(InflRad2 - r*r, 3);
+    
+}
+
+float2 pressureKernelGradient (float2 diff, float r)
+{
+    // Avoid division by zero
+    return -45.0f / (Pi * InflRad6) * (r-InflRad) * (r-InflRad) * diff / (r + 1e-5f);
+}
+
+float2 viscosityKernelLaplacian (float r)
+{
+    return 45.0f / (Pi * InflRad6) * (InflRad - r);
+}
+
+
+
+[numthreads(128,1,1)]
+void Integrate (uint3 id : SV_DispatchThreadID)
+{
+    float2 pos = particles[id.x].position;
+    float2 vel = particles[id.x].velocity;
+    float2 force = particles[id.x].currentForce/Mass;
+
+
+    particles[id.x].velocity = vel + force * DeltaTime;
+    // Hope more stability
+    if(length(particles[id.x].velocity) > 10){
+        particles[id.x].velocity = normalize(particles[id.x].velocity) * 10;
+    }
+    particles[id.x].position = pos + vel * DeltaTime;
+    particles[id.x].currentForce = float2(0, 0);
+
+    
+
+
+    // Bounce on walls
+    if(particles[id.x].position.x < -BoundingBox.x/2){
+        particles[id.x].position.x = -BoundingBox.x/2;
+        particles[id.x].velocity.x = -particles[id.x].velocity.x * Bounce;
+    }
+    if(particles[id.x].position.x > BoundingBox.x/2){
+        particles[id.x].position.x = BoundingBox.x/2;
+        particles[id.x].velocity.x = -particles[id.x].velocity.x * Bounce;
+    }
+    if(particles[id.x].position.y < -BoundingBox.y/2){
+        particles[id.x].position.y = -BoundingBox.y/2;
+        particles[id.x].velocity.y = -particles[id.x].velocity.y * Bounce;
+    }
+    if(particles[id.x].position.y > BoundingBox.y/2){
+        particles[id.x].position.y = BoundingBox.y/2;
+        particles[id.x].velocity.y = -particles[id.x].velocity.y * Bounce;
+    }
+   
+    float2 cellPos = (particles[id.x].position + BoundingBox/2)/BoundingBox * NumCells;
+    int cell = int(cellPos.x) + int(cellPos.y) * NumCells;
+    particles[id.x].cellIndex = cell;
+    
+}
+
+[numthreads(128,1,1)]
+void ComputeForces (uint3 id : SV_DispatchThreadID)
+{
+    float2 vel = particles[id.x].velocity;
+    float pressure = particles[id.x].pressure;
+
+    float2 gravity = Mass * G * float2(0, -1);
+    float2 pressureForce = float2(0, 0);
+    float2 viscosityForce = float2(0, 0);
+    
+    
+    for(uint i = 0; i < particles.Length; i++){
+        if(i == id.x) continue;
+        float2 diff = particles[id.x].position - particles[i].position;
+        float r = length(diff);
+        if(r < InflRad){
+            pressureForce += -Mass  * (pressure+particles[i].pressure) / (2*particles[i].density) * pressureKernelGradient(diff, r);
+            viscosityForce += Viscosity * Mass * (particles[i].velocity-vel) / particles[i].density * viscosityKernelLaplacian(r);
+        }
+    }
+    /*
+    uint i = cellStart[particles[id.x].cellIndex];
+    while(i < particles.Length && particles[i].cellIndex == particles[id.x].cellIndex){
+        if(i == id.x) continue;
+        float2 diff = particles[id.x].position - particles[i].position;
+        float r = length(diff);
+        if(r < InflRad){
+            pressureForce += -Mass  * (pressure+particles[i].pressure) / (2*particles[i].density) * pressureKernelGradient(diff, r);
+            viscosityForce += Viscosity * Mass * (particles[i].velocity-vel) / particles[i].density * viscosityKernelLaplacian(r);
+        }
+        i++;
+    }
+        */
+
+
+    particles[id.x].currentForce = gravity + pressureForce + viscosityForce;
+}
+
+[numthreads(128,1,1)]
+void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
+{
+    float density = 0;
+    float totDist = 0;
+    /*
+    uint i = cellStart[particles[id.x].cellIndex];
+    while(i < particles.Length && particles[i].cellIndex == particles[id.x].cellIndex){
+        float2 diff = particles[id.x].position - particles[i].position;
+        if(length(diff) < InflRad && i != id.x){
+            totDist += densityKernel(diff); 
+        }
+        i++;
+    }
+    */
+    for(uint i = 0; i < particles.Length; i++){
+        float2 diff = particles[id.x].position - particles[i].position;
+        if(length(diff) < InflRad && i != id.x){
+            totDist += densityKernel(diff); 
+        }
+    }
+    density = totDist*Mass;
+    particles[id.x].density = density;
+    particles[id.x].pressure = K*(density - RestDensity);
+    if(particles[id.x].pressure < 0) particles[id.x].pressure = 0;
+}
